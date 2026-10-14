@@ -1,20 +1,10 @@
-# Publishes app/ to GitHub Pages after the engine tests pass.
-# One-time setup: repo Settings > Pages > Source: GitHub Actions.
-name: Deploy to GitHub Pages
+# Runs the engine tests on every push. The site itself is published by GitHub Pages from the branch
+# (Settings > Pages > Deploy from a branch), so the app is at https://anki1kr.me/NoticeDecoder/app/
+name: Tests
 
 on:
   push:
-    branches: [master, main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
+  pull_request:
 
 jobs:
   test:
@@ -25,18 +15,3 @@ jobs:
         with:
           node-version: 22
       - run: node tests/engine.test.mjs
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: app
-      - id: deployment
-        uses: actions/deploy-pages@v4

@@ -2,7 +2,7 @@
 
 **SETU 2026 · Forge Realm · PS-02.** Paste a messy college notice. Get clear events, catch clashes, add them to your calendar.
 
-Live demo: _add link after deploy_ · Runs fully in the browser: the notice never leaves your device and the demo works without internet.
+**Live demo: https://anki1kr.me/NoticeDecoder/app/** · Runs fully in the browser: the notice never leaves your device and the demo works without internet.
 
 ## What it does
 

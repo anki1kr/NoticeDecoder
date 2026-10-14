@@ -16,6 +16,10 @@ from pptx.util import Inches, Pt
 ROOT = Path(__file__).resolve().parent.parent
 SHOTS = ROOT / 'tmp' / 'deck'
 OUT = ROOT / 'deck' / 'NoticeDecoder_NovaNexus_PS02.pptx'
+LIVE = 'https://anki1kr.me/NoticeDecoder/app/'
+sys.path.insert(0, str(Path.home() / '.claude' / 'skills' / 'sih-deck' / 'scripts'))
+import _env  # noqa: F401  (puts the skill's own copy of segno on the path)
+import segno
 
 BLUE = RGBColor(0x00, 0x33, 0xEE)      # PS-02 banner in the SETU PDF
 NAVY = RGBColor(0x02, 0x01, 0x29)      # table heads in the SETU PDF
@@ -115,6 +119,15 @@ def arrow(slide, x, y, w=0.34, h=0.3, down=False):
     a.fill.solid(); a.fill.fore_color.rgb = RGBColor(0x9A, 0xA3, 0xC4); a.line.fill.background(); a.shadow.inherit = False
 
 
+def qr_code(slide, url, x, y, size):
+    """QR made from the link itself, so it cannot point anywhere else; clickable in the PDF too."""
+    path = SHOTS / 'qr-live.png'
+    segno.make(url, error='m').save(str(path), scale=12, border=2)
+    pic = slide.shapes.add_picture(str(path), Inches(x), Inches(y), Inches(size), Inches(size))
+    pic.line.color.rgb = LINE; pic.line.width = Pt(0.75)
+    pic.click_action.hyperlink.address = url
+
+
 def pin(slide, x, y, n):
     c = rect(slide, x, y, 0.36, 0.36, BLUE, WHITE, MSO_SHAPE.OVAL)
     c.line.width = Pt(2)
@@ -181,9 +194,12 @@ text(s, 0.55, 4.75, 7.7, 1.2, ['**Rules that show their reasons.** Every date, t
                                 '**Runs in the browser:** works offline, the notice never leaves the phone, **₹0** per notice.'], 16, INK, BLUE, space=8)
 number(s, 8.55, 3.62, 2.05, 1.5, '3 of 3', 'events right on the PS-02 example')
 number(s, 10.73, 3.62, 2.05, 1.5, f'{H_OK} of {H_TOTAL}', f'checks right on {notices} new messy notices', bs=24)
-ph = rect(s, 8.55, 5.3, 4.23, 1.55, WHITE, LINE, MSO_SHAPE.ROUNDED_RECTANGLE, 0.06)
-ph.line.dash_style = 4
-text(s, 8.7, 5.42, 3.95, 1.3, ['**Live demo**', 'QR code and link go here after deploy'], 14, GREY, NAVY, PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+qr_code(s, LIVE, 8.75, 5.22, 1.45)
+text(s, 10.35, 5.3, 2.5, 1.4, ['**Live demo**', 'Scan, or open:'], 14, INK, NAVY, space=2)
+link = s.shapes[-1].text_frame.add_paragraph()
+r = link.add_run(); r.text = 'anki1kr.me/NoticeDecoder/app'; r.hyperlink.address = LIVE
+r.font.name, r.font.size, r.font.bold, r.font.color.rgb = FONT, Pt(13), True, BLUE
+link.add_run().text = ' '   # a plain run after the link keeps PowerPoint's PDF export from dropping it
 
 # ---------------------------------------------------------------- 2. problem
 s = frame(1, 'The problem', 'Dates, times and rooms hide inside long paragraphs, so students miss them or find clashes too late.')

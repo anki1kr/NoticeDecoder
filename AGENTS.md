@@ -54,6 +54,6 @@ PDF of the deck: `powershell -File ~/.claude/skills/sih-deck/scripts/render.ps1 
 
 ## Deploy
 
-GitHub Pages through `.github/workflows/pages.yml`: on push to `master`/`main` it runs the engine tests, then publishes
-`app/`. One-time setup by the owner: repo Settings > Pages > Source: **GitHub Actions**. Live URL:
-`https://<github-user>.github.io/<repo-name>/`.
+Repo `anki1kr/NoticeDecoder`. GitHub Pages deploys from the `master` branch root (Settings > Pages > Deploy from a branch),
+so the README is the landing page and the app is **https://anki1kr.me/NoticeDecoder/app/** (the account's Pages use the custom
+domain `anki1kr.me`; `anki1kr.github.io/NoticeDecoder/` redirects there). `.github/workflows/pages.yml` only runs the engine tests.
