@@ -35,7 +35,7 @@ Judging: Completeness 35, Monetization 30, Innovation 20, UI/UX 15. The PS text 
 | `tests/engine.test.mjs` | engine tests (node only, no framework) |
 | `examples/` | real notices + expected answers |
 | `docs/PITCH.md` | demo script, judge Q&A, money |
-| `deck/build_deck.py` | builds the PPTX from screenshots and live test numbers |
+| `deck/build_deck.py`, `tools/deck-shots.mjs` | builds the 6-slide PPTX (+PDF) in the SETU PS-02 look from app screenshots and live test numbers |
 | `research/` | market research; `SYNTHESIS.md` is the summary, `06-public-competitors.md` the code-checked competitor table |
 
 ## Commands
@@ -50,7 +50,7 @@ node tools/ui-check.mjs                                          # 42 browser ch
 python tools/make-icons.py                                       # regenerates app/icon-*.png (PIL)
 python tmp/test_ui_real.py && python tmp/test_review.py        # browser checks (Playwright, needs the server on 8771)
 node tmp/judge1/run-notices.mjs                                # 20 outside messy notices, per-field score
-python tmp/deck/capture.py && python deck/build_deck.py        # screenshots, then the deck (needs the server)
+PLAYWRIGHT_DIR=<project with playwright> node tools/deck-shots.mjs && python deck/build_deck.py   # screenshots, then the 6-slide deck (.pptx + .pdf; needs the server on 8771; numbers read from the test runs)
 ```
 PDF of the deck: `powershell -File ~/.claude/skills/sih-deck/scripts/render.ps1 -Deck deck/NoticeDecoder_NovaNexus_PS02.pptx -Pdf <abs path>.pdf`
 
