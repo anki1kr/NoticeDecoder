@@ -8,8 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const ORDER = ['dates.js', 'holidays.js', 'parse.js', 'clash.js', 'ics.js'];
-const PUBLIC = ['parseNotice', 'findClashes', 'toICS', 'gcalUrl', 'calendarEntries', 'REMINDER', 'TZ', 'HOLIDAYS', 'holidayOn', 'findDates', 'findTimes', 'findDurations', 'fmt12', 'prettyDate'];
+const ORDER = ['ocrfix.js', 'dates.js', 'holidays.js', 'parse.js', 'clash.js', 'ics.js'];
+const PUBLIC = ['parseNotice', 'findClashes', 'toICS', 'gcalUrl', 'calendarEntries', 'REMINDER', 'TZ', 'HOLIDAYS', 'holidayOn', 'findDates', 'findTimes', 'findDurations', 'fmt12', 'prettyDate', 'fixOcrText', 'normalizeNames'];
 
 const mods = {};
 for (const file of ORDER) {

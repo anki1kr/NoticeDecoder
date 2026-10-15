@@ -44,6 +44,8 @@ await context.addInitScript(() => {
     const j = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json' } });
     if (u.endsWith('/api/class')) return j({ id: 'abcd2345', secret: 'sec', name: body.name, feed: 'https://feed.test/c/abcd2345.ics', page: 'https://feed.test/c/abcd2345' }, 201);
     if (/\/publish$/.test(u)) { if (init.headers?.Authorization !== 'Bearer sec') return j({ error: 'Wrong or missing class secret.' }, 401); let added = 0, updated = 0; const list = feed.events; for (const e of body.events) { const i = list.findIndex((x) => x.title === e.title); if (i >= 0) { list[i] = e; updated++; } else { list.push(e); added++; } } feed.events = list; return j({ id: 'abcd2345', added, updated, count: list.length, clashes: feed.events.length >= 3 ? [{ a: 'Internal Test 2', b: 'Guest lecture: AI in Healthcare', date: '2026-11-13', msg: 'Clash. They overlap from 11:00 to 11:30 AM (30 minutes).' }] : [] }); }
+    if (/\/api\/class\/abcd2345\/events$/.test(u) && (init.method || 'GET') === 'GET') { if (init.headers?.Authorization !== 'Bearer sec') return j({ error: 'Wrong or missing class secret.' }, 401); const evs = feed.events.map((e) => ({ ...e, uid: `${e.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}@notice-decoder` })); return j({ id: 'abcd2345', name: 'III CSE A', updatedAt: '2026-10-15T10:00:00Z', events: evs, clashes: evs.filter((e) => !e.cancelled).length >= 3 ? [{ a: 'Internal Test 2', b: 'Guest lecture: AI in Healthcare', date: '2026-11-13', msg: 'Clash. They overlap from 11:00 to 11:30 AM (30 minutes).' }] : [] }); }
+    if (/\/api\/class\/abcd2345\/events\//.test(u) && init.method === 'DELETE') { const uid = decodeURIComponent(u.split('/events/')[1]); const list = feed.events; const i = list.findIndex((e) => `${e.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}@notice-decoder` === uid); if (i >= 0) { list[i] = { ...list[i], cancelled: true }; feed.events = list; } return j({ ok: true, uid }); }
     if (/\/c\/abcd2345\.json$/.test(u)) return j({ id: 'abcd2345', name: 'III CSE A', updatedAt: '2026-10-15T10:00:00Z', events: feed.events.map((e) => ({ ...e, uid: `${e.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}@notice-decoder` })) });
     return j({ error: 'Not found' }, 404);
   };
@@ -138,18 +140,25 @@ ok(await page.locator('#class-publish-btn').innerText() === 'Publish to III CSE 
 await page.locator('#class-publish-btn').click();
 await page.waitForFunction(() => /0 new, 3 updated/.test(document.querySelector('#class-result').innerText), null, { timeout: 5000 }).catch(() => {});
 ok(/0 new, 3 updated/.test(await page.locator('#class-result').innerText()), 'class feed: second publish updates, never duplicates');
+await page.waitForFunction(() => /3 events in III CSE A/.test(document.querySelector('#class-console-hint').innerText), null, { timeout: 5000 }).catch(() => {});
+ok(/3 events in III CSE A, 1 clash across the term/.test(await page.locator('#class-console-hint').innerText()), 'CR console: lists what is published with the term clash report', await page.locator('#class-console-hint').innerText());
+ok(await page.locator('#class-console-list li').count() === 4, 'CR console: 1 clash line + 3 events');
+page.once('dialog', (d) => d.accept());
+await page.locator('#class-console-list').getByRole('button', { name: /^Cancel Lab record/ }).click();
+await page.waitForFunction(() => /2 events in III CSE A/.test(document.querySelector('#class-console-hint').innerText), null, { timeout: 5000 }).catch(() => {});
+ok(/2 events in III CSE A/.test(await page.locator('#class-console-hint').innerText()) && (await page.locator('#class-console-list').innerText()).includes('(cancelled)'), 'CR console: Cancel marks the event cancelled for the class');
 const page5 = await context.newPage();
 page5.on('pageerror', (e) => errors.push(String(e)));
 await page5.goto(BASE, { waitUntil: 'networkidle' });
 await page5.locator('#class-join').fill('https://feed.test/c/abcd2345');
 await page5.locator('#class-join-btn').click();
 await page5.waitForSelector('#event-list .ev', { timeout: 5000 }).catch(() => {});
-ok(await page5.locator('#event-list .ev').count() === 3, 'class feed: student opens the class by link, 3 events');
+ok(await page5.locator('#event-list .ev').count() === 2, 'class feed: student opens the class by link, 2 live events (the cancelled one is gone)');
 ok((await page5.locator('#shared-text').innerText()).includes('III CSE A'), 'class feed: banner names the class');
 ok(await page5.locator('#gcal-all-btn').isEnabled() && await page5.locator('#export-btn').isEnabled(), 'class feed: student can add all in one tap');
 await page5.goto(`${BASE}#c=abcd2345`, { waitUntil: 'networkidle' });
 await page5.waitForSelector('#event-list .ev', { timeout: 5000 }).catch(() => {});
-ok(await page5.locator('#event-list .ev').count() === 3, 'class feed: #c=<id> link opens the class directly');
+ok(await page5.locator('#event-list .ev').count() === 2, 'class feed: #c=<id> link opens the class directly');
 await page5.close();
 
 // 6. Placement sample: amber fields lock the export; "Looks right" opens it
@@ -232,6 +241,50 @@ ok(await page4.locator('#decode-btn').isVisible(), 'offline: page served from ca
 ok(await page4.locator('#offline-note').isVisible(), 'offline: note shown');
 await page4.close();
 await context.setOffline(false);
+
+// 14. Files: a PDF upload reads the timetable (pdf.js from the CDN; needs internet the first time)
+await page.setViewportSize({ width: 390, height: 844 });
+await page.locator('#clear-btn').click();
+await page.locator('#file-input').setInputFiles('examples/08-pdf-timetable.pdf');
+await page.waitForFunction(() => document.querySelectorAll('#event-list .ev').length >= 5, null, { timeout: 60000 }).catch(() => {});
+ok(await page.locator('#event-list .ev').count() === 5, 'pdf upload: 5 events from the timetable PDF', await page.locator('#file-status').innerText());
+ok((await page.locator('#file-status').innerText()).startsWith('Read 08-pdf-timetable.pdf'), 'pdf upload: status names the file');
+ok(await page.locator('#export-btn').isEnabled() === false && /Thursday|photo|check/i.test(await page.locator('#event-list').innerText()), 'pdf upload: amber (PDF source) keeps the review gate');
+
+// 15. Share target with a FILE: the service worker parks the POSTed file and the page picks it up
+const shared = await page.evaluate(async () => {
+  const blob = await (await fetch('./samples.js')).blob(); // any same-origin bytes; we send the timetable as text/plain
+  const text = 'Exam schedule:\n10 Nov 2026 - Maths - 10 AM to 1 PM - Room 1\n11 Nov 2026 - Physics - 10 AM to 1 PM - Room 1';
+  const fd = new FormData();
+  fd.append('title', 'Timetable');
+  fd.append('file', new File([text], 'timetable.txt', { type: 'text/plain' }));
+  const res = await fetch('./', { method: 'POST', body: fd, redirect: 'follow' });
+  const cache = await caches.open('nd-share');
+  const parked = await cache.match('./shared-file');
+  return { status: res.status, url: res.url, parked: Boolean(parked), size: blob.size > 0 };
+});
+ok(shared.parked && shared.status === 200, 'share target file: service worker parked the POSTed file (303 followed to the shell)', JSON.stringify(shared));
+await page.goto(`${BASE}?shared=file`, { waitUntil: 'networkidle' });
+await page.waitForSelector('#event-list .ev', { timeout: 10000 }).catch(() => {});
+ok(await page.locator('#event-list .ev').count() === 2, 'share target file: the parked text file was decoded on load');
+ok(!page.url().includes('shared='), 'share target file: query removed');
+const stillParked = await page.evaluate(async () => Boolean(await (await caches.open('nd-share')).match('./shared-file')));
+ok(!stillParked, 'share target file: parked file deleted after use');
+
+// 16. Photo OCR (tesseract.js; ~10 MB download on first run) only when OCR_CHECKS=1
+if (process.env.OCR_CHECKS === '1') {
+  await page.locator('#clear-btn').click();
+  await page.locator('#file-input').setInputFiles('examples/07-photo-notice.png');
+  await page.waitForFunction(() => /^(Read |Nothing readable|The text reader)/.test(document.querySelector('#file-status').innerText), null, { timeout: 240000 }).catch(() => {});
+  console.log('   photo OCR status:', await page.locator('#file-status').innerText());
+  console.log('   photo OCR text:', JSON.stringify((await page.locator('#notice-input').inputValue()).slice(0, 300)));
+  const titles = await titlesOf();
+  const got = (re) => titles.some((t) => re.test(t || ''));
+  ok(titles.length >= 2 && got(/Internal Test/i) && (got(/Lab record/i) || got(/Guest lecture/i)), 'photo OCR: events read from the photographed notice', JSON.stringify(titles));
+  ok(/photo/i.test(await page.locator('#event-list').innerText()), 'photo OCR: every event asks for a check against the picture');
+  const libs = await page.evaluate(async () => (await (await caches.open('nd-libs-v1')).keys()).length);
+  ok(libs >= 2, 'photo OCR: reader libraries cached for offline use', String(libs));
+}
 
 // 13. Desktop screenshot
 await page.setViewportSize({ width: 1280, height: 900 });

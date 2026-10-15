@@ -91,6 +91,29 @@ await test('subscribe page: Google and webcal links, the event list, the app lin
   assert.match(html, new RegExp(`#c=${cls.id}`));
 });
 
+await test('CR console: /events lists everything with the clash report, Bearer only; ETag gives 304 to pollers', async () => {
+  assert.equal((await req('GET', `/api/class/${cls.id}/events`)).status, 401);
+  const r = await req('GET', `/api/class/${cls.id}/events`, { token: cls.secret });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.equal(j.events.length, 3, 'cancelled ones are listed too (with cancelled:true)');
+  assert.ok(j.events.some((e) => e.cancelled));
+  assert.equal(j.clashes.length, 0, 'the deadline was cancelled, the test moved: nothing left to clash');
+  assert.match(j.feed, /\.ics$/);
+  const first = await req('GET', `/c/${cls.id}.json`);
+  const etag = first.headers.get('etag');
+  assert.ok(etag && /^"[0-9a-f]{64}"$/.test(etag));
+  const again = await handle(new Request(`${BASE}/c/${cls.id}.json`, { headers: { 'if-none-match': etag } }), env);
+  assert.equal(again.status, 304);
+  await req('POST', `/api/class/${cls.id}/publish`, { body: { events: [{ title: 'Viva', type: 'test', date: '2026-11-14', start: '11:00' }] }, token: cls.secret });
+  const after = await handle(new Request(`${BASE}/c/${cls.id}.json`, { headers: { 'if-none-match': etag } }), env);
+  assert.equal(after.status, 200, 'a publish changes the ETag');
+  const ics = await (await req('GET', `/c/${cls.id}.ics`)).text();
+  assert.match(ics, /REFRESH-INTERVAL;VALUE=DURATION:PT1H/);
+  assert.match(ics, /X-PUBLISHED-TTL:PT1H/);
+  assert.ok(ics.split('\r\n').every((l) => new TextEncoder().encode(l).length <= 75));
+});
+
 await test('junk is refused: bad JSON, no events, events without a date, unknown class, oversized body', async () => {
   const bad = await handle(new Request(`${BASE}/api/class/${cls.id}/publish`, { method: 'POST', headers: { authorization: `Bearer ${cls.secret}`, 'content-type': 'application/json' }, body: '{not json' }), env);
   assert.equal(bad.status, 400);

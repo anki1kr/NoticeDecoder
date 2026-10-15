@@ -1,6 +1,8 @@
 // Date and time token finders. Every token keeps its [start, end) offset in the original text
 // so the UI can highlight exactly the words a field came from.
 
+import { normalizeNames } from './ocrfix.js';
+
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MON = String.raw`(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
@@ -49,8 +51,20 @@ const NOT_A_DATE_BEFORE = /\b(?:minimum|min\.?|marks?|scored?|scores?|cgpa|sgpa|
 const NOT_A_DATE_AFTER = /^\s*(?:marks?|%|percent|points?|cgpa)\b/i;
 
 // Absolute dates ("13 Nov 2026", "15th October, 2026", "Nov 13", "13/11/2026", "2026-11-13", "13 नवंबर 2026") and relative words.
+// A misspelt month or weekday ("Nvo", "Thrusday") is corrected in place, same length, so offsets never move; the token
+// that covers it carries `nameFix` so the engine can tell the student what it read.
 export function findDates(text) {
-  text = asciiDigits(text);
+  const normalized = normalizeNames(asciiDigits(text));
+  text = normalized.text;
+  const out = findDatesIn(text);
+  for (const tok of out) {
+    const fix = normalized.fixes.find((f) => f.s < tok.e && f.e > tok.s);
+    if (fix) tok.nameFix = fix;
+  }
+  return out;
+}
+
+function findDatesIn(text) {
   const out = [];
   const taken = [];
   const free = (s, e) => !taken.some(([a, b]) => s < b && e > a);

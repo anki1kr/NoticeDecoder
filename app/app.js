@@ -6,6 +6,8 @@ import { toICS, gcalUrl } from './engine/ics.js';
 import { SAMPLES } from './samples.js';
 import * as gcal from './gcal.js';
 import { FEED_BASE } from './config.js';
+import { fixOcrText } from './engine/ocrfix.js';
+// ocr.js and pdftext.js are imported on first use (they pull a reader library from a CDN once).
 
 const AUTO_ADD_KEY = 'nd-auto-add';
 const CLASS_KEY = 'nd-class'; // { id, secret, name, feed, page } for the class representative
@@ -43,6 +45,13 @@ const els = {
   decode: $('#decode-btn'),
   clear: $('#clear-btn'),
   paste: $('#paste-btn'),
+  upload: $('#upload-btn'),
+  camera: $('#camera-btn'),
+  fileInput: $('#file-input'),
+  cameraInput: $('#camera-input'),
+  fileStatus: $('#file-status'),
+  hindi: $('#hindi-ocr'),
+  inputCard: $('#input-card'),
   samples: $('#sample-list'),
   results: $('#results'),
   warnings: $('#warnings'),
@@ -82,6 +91,10 @@ const els = {
   classOpenRow: $('#class-open-row'),
   classOpenResult: $('#class-open-result'),
   classResult: $('#class-result'),
+  classConsole: $('#class-console'),
+  classRefresh: $('#class-refresh-btn'),
+  classConsoleHint: $('#class-console-hint'),
+  classConsoleList: $('#class-console-list'),
   install: $('#install-btn'),
   offline: $('#offline-note'),
 };
@@ -189,7 +202,7 @@ function clearInputError() {
 
 // `auto` = the notice arrived on its own (share sheet, clipboard): when nothing needs a check and auto-add is on,
 // the events go straight to Google Calendar, with Undo. A pasted or typed notice never auto-adds.
-function decode(text, { auto = false } = {}) {
+function decode(text, { auto = false, source = 'text' } = {}) {
   if (!text.trim()) {
     showInputError(EMPTY_INPUT_MSG);
     return;
@@ -197,24 +210,28 @@ function decode(text, { auto = false } = {}) {
   clearInputError();
   let result;
   try {
-    result = parseNotice(text, { pastedAt: new Date() });
+    result = parseNotice(text, { pastedAt: new Date(), source });
   } catch (err) {
     console.error('parseNotice failed', err);
     showInputError(PARSE_ERROR_MSG);
     return;
   }
   state.decodedText = text;
+  state.source = source;
   state.result = result;
   state.events = (result.events || []).map((raw, i) => workingCopy(raw, i));
   state.exportNote = null;
   state.shared = null;
   state.lastRemoved = null;
   state.gcalLast = null;
+  if (source === 'text') fileStatus('');
   els.results.hidden = false;
   renderAll();
   els.noticeText.classList.add('draw'); // highlighter strokes draw in once per decode, not on every edit
   setTimeout(() => els.noticeText.classList.remove('draw'), 3000);
-  els.results.focus();
+  // Keyboard and screen-reader users land on the first field that needs them; otherwise on the summary.
+  const firstAmber = els.eventList.querySelector('.needs-check input, .needs-check select');
+  if (firstAmber) firstAmber.focus({ preventScroll: false }); else els.results.focus();
   if (auto) maybeAutoAdd();
 }
 
@@ -227,7 +244,11 @@ function clearAll() {
   state.exportNote = null;
   state.shared = null;
   state.lastRemoved = null;
+  state.source = 'text';
+  fileStatus('');
   cards.clear();
+  els.eventList.replaceChildren(); // stale cards must not survive under the hidden results block
+  els.warnings.replaceChildren();
   els.results.hidden = true;
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   els.input.focus();
@@ -738,11 +759,42 @@ async function addAllToGoogle({ silent = false } = {}) {
       undo: result.added.length ? undoGoogle : null,
     };
   } catch (err) {
-    state.exportNote = { kind: 'error', text: String(err.message || err) };
+    // No network: keep the reviewed events and add them when the connection returns (see retryQueued in init).
+    if (!navigator.onLine || /Failed to fetch|NetworkError|Load failed/i.test(String(err.message))) {
+      queueForLater(silent);
+      state.exportNote = { kind: '', text: 'You are offline. These events will be added to Google Calendar when you are back online.' };
+    } else {
+      state.exportNote = { kind: 'error', text: String(err.message || err) };
+    }
   } finally {
     state.busy = false;
     renderExport();
   }
+}
+
+const QUEUE_KEY = 'nd-gcal-queue';
+function queueForLater(silent) {
+  try {
+    const q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    q.push({ at: Date.now(), reminders: els.reminders.checked, silent, events: state.events.map((ev) => ({ ...ev, sources: {}, why: {}, flags: [] })) });
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(q.slice(-10)));
+  } catch { /* storage full or blocked: the status line still tells the user */ }
+}
+
+async function retryQueued() {
+  let q = [];
+  try { q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return; }
+  if (!q.length || !navigator.onLine || !gcal.signedIn()) return;
+  const rest = [];
+  let added = 0;
+  for (const item of q) {
+    try {
+      const r = await gcal.addAll(item.events, { reminders: item.reminders, silent: true }, window.__ndGcalDeps || {});
+      if (r) added += r.added.length + r.updated.length; else rest.push(item);
+    } catch { rest.push(item); }
+  }
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(rest)); } catch { /* ignore */ }
+  if (added) { state.exportNote = { kind: 'ok', text: `Back online: ${added} queued event${added === 1 ? '' : 's'} added to Google Calendar.` }; renderExport(); }
 }
 
 async function undoGoogle() {
@@ -917,7 +969,42 @@ function renderClass() {
     ? el('span', {}, `Your class: ${c.name}. Subscribe page: `, el('a', { href: c.page, target: '_blank', rel: 'noopener' }, c.page))
     : 'No class yet. The first publish creates one and gives you its subscribe link.');
   els.classLink.hidden = !c;
+  els.classConsole.hidden = !c;
   els.classPublish.textContent = c ? `Publish to ${c.name}` : 'Publish to class';
+}
+
+// CR console: everything published so far, the term-wide clash report, and a Cancel per event.
+async function loadConsole() {
+  const c = myClass();
+  if (!c) return;
+  els.classConsoleHint.textContent = 'Loading…';
+  try {
+    const data = await feedCall('GET', `/api/class/${c.id}/events`, { token: c.secret });
+    const live = data.events.filter((e) => !e.cancelled);
+    els.classConsoleHint.textContent = `${live.length} event${live.length === 1 ? '' : 's'} in ${data.name}${data.clashes.length ? `, ${data.clashes.length} clash${data.clashes.length > 1 ? 'es' : ''} across the term` : ', no clashes across the term'}.`;
+    els.classConsoleList.replaceChildren(
+      ...data.clashes.map((x) => el('li', { class: 'console-clash' }, el('strong', {}, 'Clash: '), `${x.a} × ${x.b} (${fmtDate(x.date)}). ${x.msg.replace(/^Clash\.\s*/, '')}${x.action ? ` ${x.action}` : ''}`)),
+      ...data.events.map((e) => el('li', { class: e.cancelled ? 'console-cancelled' : '' },
+        el('span', {}, `${fmtDate(e.date)} · ${whenText(e)} · ${e.title}${e.venue ? ` · ${e.venue}` : ''}${e.cancelled ? ' (cancelled)' : ''}`),
+        e.cancelled ? null : el('button', { type: 'button', class: 'link', 'aria-label': `Cancel ${e.title}`, onclick: () => cancelPublished(e.uid, e.title) }, 'Cancel'))),
+    );
+  } catch (err) {
+    els.classConsoleHint.textContent = String(err.message || err);
+  }
+}
+
+async function cancelPublished(uid, title) {
+  const c = myClass();
+  if (!c || !window.confirm(`Cancel "${title}" for the whole class? Subscribers' calendars will drop it.`)) return;
+  try {
+    await feedCall('DELETE', `/api/class/${c.id}/events/${encodeURIComponent(uid)}`, { token: c.secret });
+    els.classResult.textContent = `Cancelled "${title}".`;
+    els.classResult.dataset.kind = 'ok';
+    loadConsole();
+  } catch (err) {
+    els.classResult.textContent = String(err.message || err);
+    els.classResult.dataset.kind = 'error';
+  }
 }
 
 async function publishToClass() {
@@ -939,6 +1026,7 @@ async function publishToClass() {
       : ' No clashes across everything published so far.';
     els.classResult.textContent = `Published: ${r.added} new, ${r.updated} updated, ${r.count} in the class calendar.${clashes} Subscribers see the change on their next refresh.`;
     els.classResult.dataset.kind = r.clashes.length ? 'error' : 'ok';
+    loadConsole();
   } catch (err) {
     els.classResult.textContent = String(err.message || err);
     els.classResult.dataset.kind = 'error';
@@ -977,6 +1065,111 @@ async function openClass(idOrLink) {
     say(String(err.message || err), 'error');
     return false;
   }
+}
+
+// ---------- files: PDF text, photo OCR, drag-drop, pasted images, shared files ----------
+
+function fileStatus(msg, kind = '') {
+  els.fileStatus.hidden = !msg;
+  els.fileStatus.textContent = msg || '';
+  els.fileStatus.dataset.kind = kind;
+  els.inputCard.setAttribute('aria-busy', kind === 'busy' ? 'true' : 'false');
+}
+
+// One path for every file: a PDF's text layer, or OCR for images and scanned PDF pages. The text lands in the paste
+// box (editable) and is decoded with source 'ocr' / 'pdf', which makes every dated event ask for one confirmation.
+async function handleFile(file, { auto = false } = {}) {
+  if (!file) return;
+  const name = file.name || 'file';
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(name);
+  const isImage = /^image\//.test(file.type) || /\.(png|jpe?g|webp|gif|bmp|heic)$/i.test(name);
+  const isText = /^text\//.test(file.type) || /\.(txt|md)$/i.test(name);
+  if (!isPdf && !isImage && !isText) { fileStatus(`"${name}" is not a PDF, an image or a text file.`, 'error'); return; }
+  if (file.size > 25 * 1024 * 1024) { fileStatus(`"${name}" is over 25 MB. Take a smaller photo or export fewer pages.`, 'error'); return; }
+  try {
+    if (isText) {
+      const text = await file.text();
+      els.input.value = text;
+      fileStatus('');
+      decode(text, { auto });
+      return;
+    }
+    let text = '', source = 'pdf', notes = [];
+    if (isPdf) {
+      fileStatus(`Reading ${name}…`, 'busy');
+      const { pdfToText } = await import('./pdftext.js');
+      const r = await pdfToText(file, { onProgress: ({ page, pages }) => fileStatus(`Reading ${name}: page ${page} of ${pages}…`, 'busy') });
+      text = r.text;
+      if (r.truncated) notes.push(`Only the first 5 of ${r.pages} pages were read.`);
+      if (r.scanned.length) {
+        const { ocrImage } = await import('./ocr.js');
+        for (const [i, canvas] of r.scanned.entries()) {
+          const o = await ocrImage(canvas, { hindi: els.hindi.checked, onProgress: (p) => fileStatus(`Scanned page ${i + 1}: reading the picture… ${Math.round((p.progress || 0) * 100)}%`, 'busy') });
+          text += (text ? '\n\n' : '') + o.text;
+          source = 'ocr';
+          if (o.lowLines.length) notes.push(`${o.lowLines.length} line${o.lowLines.length > 1 ? 's' : ''} read with low confidence.`);
+        }
+      }
+    } else {
+      fileStatus('Reading the photo…', 'busy');
+      const { ocrImage } = await import('./ocr.js');
+      const o = await ocrImage(file, { hindi: els.hindi.checked, onProgress: (p) => fileStatus(p.stage === 'read' ? `Reading the photo… ${Math.round(p.progress * 100)}%` : `Preparing the reader (${p.stage})…`, 'busy') });
+      text = o.text;
+      source = 'ocr';
+      if (o.lowLines.length) notes.push(`${o.lowLines.length} line${o.lowLines.length > 1 ? 's' : ''} read with low confidence: ${o.lowLines.slice(0, 3).map((l) => `"${l.text.trim().slice(0, 40)}"`).join(', ')}.`);
+    }
+    text = fixOcrText(text);
+    if (text.replace(/\s/g, '').length < 15) { fileStatus(`Nothing readable found in ${name}. Try a sharper, straighter photo with the notice filling the frame.`, 'error'); return; }
+    els.input.value = text;
+    fileStatus(`Read ${name}${source === 'ocr' ? ' from the picture' : ''}. ${notes.join(' ')} Check the amber fields against the original.`.replace(/\s+/g, ' '), 'ok');
+    decode(text, { auto: false, source }); // never auto-add from a photo: OCR errors are silent
+  } catch (err) {
+    console.error('file read failed', err);
+    fileStatus(String(err.message || err), 'error');
+  }
+}
+
+// A file shared from another app lands here via the service worker (manifest share_target, POST).
+async function fromSharedFile() {
+  if (new URLSearchParams(location.search).get('shared') !== 'file') return false;
+  history.replaceState(null, '', location.pathname);
+  try {
+    const cache = await caches.open('nd-share');
+    const res = await cache.match('./shared-file');
+    if (!res) return false;
+    await cache.delete('./shared-file');
+    const blob = await res.blob();
+    const name = decodeURIComponent(res.headers.get('x-nd-name') || 'shared');
+    await handleFile(new File([blob], name, { type: res.headers.get('content-type') || blob.type }), { auto: true });
+    return true;
+  } catch { return false; }
+}
+
+function setupFiles() {
+  // The Android companion posts a shared file in as { type: 'nd-file', name, mime, data (base64) }.
+  const fromCompanion = (e) => {
+    let msg;
+    try { msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+    if (!msg || msg.type !== 'nd-file' || typeof msg.data !== 'string') return;
+    const bytes = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
+    handleFile(new File([bytes], msg.name || 'shared', { type: msg.mime || 'application/octet-stream' }));
+  };
+  window.addEventListener('message', fromCompanion);
+  document.addEventListener('message', fromCompanion); // Android WebView delivers on document
+  els.upload.addEventListener('click', () => els.fileInput.click());
+  els.fileInput.addEventListener('change', () => { handleFile(els.fileInput.files[0]); els.fileInput.value = ''; });
+  if (/Android|iPhone|iPad/i.test(navigator.userAgent)) els.camera.hidden = false;
+  els.camera.addEventListener('click', () => els.cameraInput.click());
+  els.cameraInput.addEventListener('change', () => { handleFile(els.cameraInput.files[0]); els.cameraInput.value = ''; });
+  // Drop a file on the paste card
+  for (const type of ['dragenter', 'dragover']) els.inputCard.addEventListener(type, (e) => { e.preventDefault(); els.inputCard.classList.add('drop'); });
+  for (const type of ['dragleave', 'drop']) els.inputCard.addEventListener(type, (e) => { e.preventDefault(); els.inputCard.classList.remove('drop'); });
+  els.inputCard.addEventListener('drop', (e) => { const f = e.dataTransfer?.files?.[0]; if (f) handleFile(f); });
+  // Paste a screenshot (Ctrl+V with an image on the clipboard)
+  els.input.addEventListener('paste', (e) => {
+    const f = [...(e.clipboardData?.files || [])][0];
+    if (f && /^image\//.test(f.type)) { e.preventDefault(); handleFile(f); }
+  });
 }
 
 // ---------- paste, share target, install, offline ----------
@@ -1065,9 +1258,10 @@ function init() {
     clearTimeout(typing);
     typing = setTimeout(() => {
       const text = els.input.value;
-      if (text.trim().length >= 15 && text !== state.decodedText) decode(text);
+      if (text.trim().length >= 15 && text !== state.decodedText) decode(text, { source: state.source || 'text' }); // an edited OCR text stays "from a photo"
     }, DECODE_DEBOUNCE_MS);
   });
+  setupFiles();
   els.add.addEventListener('click', addManual);
   els.exportBtn.addEventListener('click', downloadIcs);
   els.gcalAll.addEventListener('click', () => addAllToGoogle());
@@ -1084,6 +1278,7 @@ function init() {
   }
   els.classPublish.addEventListener('click', publishToClass);
   els.classLink.addEventListener('click', copyClassLink);
+  els.classRefresh.addEventListener('click', loadConsole);
   els.classJoinBtn.addEventListener('click', () => openClass(els.classJoin.value));
   els.classJoin.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openClass(els.classJoin.value); } });
   renderClass();
@@ -1091,7 +1286,12 @@ function init() {
   window.addEventListener('hashchange', () => { if (!loadShared(location.hash) && !classInHash() && state.shared) clearAll(); });
   setupInstall();
   setupOffline();
-  if (!fromShareTarget() && !loadShared(location.hash)) classInHash();
+  window.addEventListener('online', retryQueued);
+  retryQueued();
+  (async () => {
+    if (await fromSharedFile()) return;
+    if (!fromShareTarget() && !loadShared(location.hash)) classInHash();
+  })();
 }
 
 init();

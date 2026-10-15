@@ -28,6 +28,7 @@
       ["expo-calendar", { "calendarPermission": "Notice Decoder writes the events it finds in your class notices into a calendar you choose." }],
       ["expo-notifications", { "icon": "./assets/icon.png", "color": "#3d2c8d" }],
       "expo-background-task",
+      ["expo-share-intent", { "androidIntentFilters": ["text/*", "image/*", "application/pdf"] }],
       "./plugins/withNotificationListener.js"
     ],
     "extra": {

@@ -43,6 +43,7 @@ A real phone is needed to see WhatsApp notifications (an emulator has no WhatsAp
 | `src/notify.js` | local notifications with Undo / Check actions |
 | `src/feed.js` | class feed: pull every 15 min (expo-background-task), CR push |
 | `src/review.js` | the web app in a WebView on the parked events; its "Add all" posts back to the phone calendar |
+| `src/share.js` | Share -> Notice Decoder (expo-share-intent): text opens the web app on `?text=`, a PDF/photo is posted into it as an `nd-file` message, so the same OCR/PDF reader and review gate run |
 | `App.js` | permissions, group picker, switches, pending list, test box, log |
 
 ## Known limits (say them in the demo)

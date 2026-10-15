@@ -37,8 +37,18 @@
       <div class="actions">
         <button type="button" id="decode-btn" class="btn primary">Decode notice</button>
         <button type="button" id="paste-btn" class="btn" hidden>Paste and decode</button>
+        <button type="button" id="upload-btn" class="btn">Upload a PDF or photo</button>
+        <button type="button" id="camera-btn" class="btn" hidden>Take a photo</button>
         <button type="button" id="clear-btn" class="btn">Clear</button>
+        <input type="file" id="file-input" accept="image/*,application/pdf,text/plain" hidden>
+        <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
       </div>
+      <p id="file-status" class="status" role="status" aria-live="polite" hidden></p>
+      <label class="check" id="hindi-row">
+        <input type="checkbox" id="hindi-ocr">
+        <span>The photo is in Hindi (Devanagari)</span>
+      </label>
+      <p class="hint">Photos and PDFs are read on this device (nothing is uploaded). The first photo downloads the reader once (about 10 MB); after that it works offline. Drop a file on the box, or paste a screenshot.</p>
       <div class="samples">
         <span>Try an example:</span>
         <div id="sample-list" class="sample-list"></div>
@@ -137,6 +147,13 @@
           <button type="button" id="class-link-btn" class="btn" hidden>Copy subscribe link</button>
         </div>
         <p id="class-result" class="status" role="status" aria-live="polite"></p>
+        <div id="class-console" hidden>
+          <div class="actions">
+            <button type="button" id="class-refresh-btn" class="btn small">Show everything published</button>
+          </div>
+          <p id="class-console-hint" class="hint"></p>
+          <ul id="class-console-list" class="plain"></ul>
+        </div>
       </section>
     </div>
   </main>

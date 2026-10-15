@@ -14,6 +14,8 @@ import { feedConfigured, pullClass, scheduleFeedPolling } from './src/feed.js';
 import { removeByUids } from './src/calendar.js';
 import { oneLine } from './src/pipeline.js';
 import Review from './src/review.js';
+import Share from './src/share.js';
+import { useShareIntent } from 'expo-share-intent';
 
 const SAMPLE = 'All III-year CSE students: Internal Test 2 will be held on 13 Nov 2026 from 10:00 AM to 11:30 AM in Room 204. Lab records must be submitted to the department office by 12:00 noon on 13 Nov. A guest lecture on "AI in Healthcare" is scheduled on 13 Nov, 11:00 AM to 12:30 PM, Seminar Hall.';
 
@@ -29,6 +31,7 @@ export default function App() {
   const [newGroup, setNewGroup] = useState('');
   const [testText, setTestText] = useState(SAMPLE);
   const [msg, setMsg] = useState('');
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
   const refresh = useCallback(async () => {
     setS(await getSettings());
@@ -57,6 +60,9 @@ export default function App() {
   }, [refresh]);
 
   if (!settings) return <View style={s.center}><Text>Loading...</Text></View>;
+  if (hasShareIntent && (shareIntent?.text || shareIntent?.files?.length)) {
+    return <Share intent={shareIntent} onDone={() => { resetShareIntent(); refresh(); }} />;
+  }
   if (review) return <Review item={review} onDone={() => { setReview(null); refresh(); }} />;
 
   const groups = settings.groups;

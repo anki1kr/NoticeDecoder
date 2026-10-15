@@ -15,10 +15,14 @@ review rule ("the user can fix every field before anything is exported") and mak
 | **WhatsApp class group** (Android) | The companion app reads the group's notifications, decodes on the phone, writes the events into the phone calendar, and notifies *Added 3 events (Undo)*. An amber field -> *1 event needs a check* -> the web app opens on that one event. | `companion/` |
 | **College email** | A Gmail Apps Script in the student's own Google account runs every 15 min: certain events straight into Google Calendar, amber ones -> one email with a one-tap check link. | `integrations/gmail-apps-script/` |
 | **Shared to the web app** (WhatsApp -> Share, or the paste button) | Decodes at once (no Decode click), clean events as one-line rows, amber ones as the only forms. **Add all to Google Calendar** writes them in one tap (sign-in once). With *Add automatically* on and nothing amber, a shared notice adds itself. | `app/app.js`, `app/gcal.js` |
-| **The class representative publishes** | One click; the class subscribes once to a calendar link that updates itself when a notice is revised, with a term-wide clash report on every publish. | `worker/` |
+| **A PDF or a photo of the notice board** (upload, drag-drop, paste a screenshot, camera, or WhatsApp → Share a file) | Read on the device: pdf.js for the text layer, Tesseract OCR for photos and scanned pages, then the same rules. OCR mistakes are silent, so every event from a photo asks for one "Looks right". Nothing is uploaded; the reader downloads once (~10 MB) and then works offline. | `app/pdftext.js`, `app/ocr.js`, `app/engine/ocrfix.js` |
+| **The class representative publishes** | One click; the class subscribes once to a calendar link that updates itself when a notice is revised, with a term-wide clash report on every publish. The CR console lists everything published and cancels an event for the whole class; feeds answer 304 to pollers and carry refresh hints. | `worker/`, section 6 in `app/app.js` |
 
 Same UIDs everywhere (`app/engine/ics.js::calendarEntries`): adding twice updates, a revised notice moves the event,
-nothing duplicates. Setup for each piece is in its folder's README. Still manual: the paste box, as the fallback.
+nothing duplicates. Offline when auto-adding? The reviewed events wait in the browser and go in when the connection
+returns. Multi-day runs ("practicals 25 to 30 Oct") are clash-checked on every day they run. Setup for each piece is
+in its folder's README; the owner's four one-time steps are in `docs/DEPLOY.md` (`node tools/configure.mjs` writes the
+ids into every file, `node tools/smoke-live.mjs` checks the live site). Still manual: the paste box, as the fallback.
 
 ## What it does
 
@@ -57,6 +61,8 @@ The closest tools we found (ScreenToCal, and a notice-to-calendar project from a
 | `2026-11-20` (portal format), `0700 hrs`, `by EOD`, "between 9 and 11 AM", "starts at 10 and ends by 1" | Read, with EOD flagged as an assumption |
 | "Reporting time 8:30 AM, Time 10:00 AM" | Starts at 10, reporting time kept as a note |
 | गणित की परीक्षा 13 नवंबर 2026 को सुबह 10 बजे कमरा 204 में | Hindi months, times, event words and rooms (Devanagari digits too) |
+| "13 Nvo", "Thrusday", "Sepetmber" | Typo-tolerant month and weekday names (same length, offsets kept), with a note "read 'Nvo' as Nov" |
+| A photo: `1O:OO AM`, `l3 Nov`, `Room2O4`, lines broken at the paper's edge | OCR cleanup before the rules: letter/digit confusions inside numbers, glued AM/PM, dewrapped sentences, table pipes |
 
 AI is not needed for any of this, so results are the same every time, cost nothing to run and can be checked by the student.
 
@@ -78,7 +84,7 @@ No install, no build. Serve the `app` folder with any static server:
 npx serve app        # or: python -m http.server 8000 --directory app
 ```
 
-Tests (Node 18+): `node tests/engine.test.mjs` (27 engine tests), `node worker/test/feed.test.mjs` (8), `node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs` (7), `cd companion && npm test` (5). Browser check of the whole page, the share link, the share target and offline mode: start the server, then `node tools/ui-check.mjs` (Playwright, 63 checks; `PLAYWRIGHT_DIR` may point at any project that has Playwright installed). Test notices with expected results live in `examples/` (six, including an exam timetable, two same-hour tests and a Hindi notice).
+Tests (Node 18+): `node tests/engine.test.mjs` (32 engine tests), `node worker/test/feed.test.mjs` (9), `node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs` (7), `cd companion && npm test` (5). Browser check of the whole page, the share link, the share target and offline mode: start the server, then `node tools/ui-check.mjs` (Playwright, 73 checks, 77 with `OCR_CHECKS=1` which downloads the OCR model once; `PLAYWRIGHT_DIR` may point at any project that has Playwright installed). Test notices with expected results live in `examples/` (six, including an exam timetable, two same-hour tests and a Hindi notice).
 
 ## Code map
 
@@ -90,6 +96,9 @@ Tests (Node 18+): `node tests/engine.test.mjs` (27 engine tests), `node worker/t
 - `app/index.html`, `app/app.js`, `app/styles.css`: the page (cards, timeline, export, share link, Undo)
 - `app/manifest.webmanifest`, `app/sw.js`, `app/icon-*.png`: installable app, offline shell, WhatsApp share target
 - `app/gcal.js`, `app/config.js`: Google Calendar one-tap writer (needs `GOOGLE_CLIENT_ID`), feed base
+- `app/pdftext.js`, `app/ocr.js`, `app/engine/ocrfix.js`: PDF text layer, photo OCR (on-device), OCR cleanup + typo-tolerant names
+- `tools/configure.mjs`, `tools/smoke-live.mjs`, `docs/DEPLOY.md`: one-command configuration, live checks, the four owner-side setup steps
+- `tools/make-fixtures.py` → `examples/07-photo-notice.png`, `examples/08-pdf-timetable.pdf`: the photo and PDF fixtures the browser check uploads
 - `worker/`: class feed (Cloudflare Worker + KV), `worker/test/feed.test.mjs`
 - `integrations/gmail-apps-script/`: Gmail -> calendar, `test/run.mjs` runs it against fake Apps Script services
 - `companion/`: Android app (Expo), `test/pipeline.test.mjs`

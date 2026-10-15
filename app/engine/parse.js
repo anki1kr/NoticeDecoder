@@ -36,7 +36,8 @@ const STOP = new Set('a an the all our your their his her its this that these th
 const GENERIC = new Set('event events test tests exam exams quiz deadline lecture lectures class classes session sessions submission registration workshop seminar webinar meeting viva practical practicals drive interview gd group discussion guest internal online offline'.split(' '));
 // Hindi function words that never name an event.
 const HINDI_STOP = 'की का के को में पर से और है हैं होगी होगा होंगे एवं तथा या कि'.split(' ');
-const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*)((?:[A-Za-z]+\s+){0,2}?(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b|\s*(?:no\.?\s*)?[A-Z]?-?\d+[A-Za-z]?)?)\b/i;
+// Place words. Indian campuses also say "LT-3" (lecture theatre), "CR-2" (classroom), "Lab-II", "Block A-204", "SH 1".
+const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*)((?:[A-Za-z]+\s+){0,2}?(?:(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b(?:-?\d{1,3})?|\s*(?:no\.?\s*)?[A-Z]?-?(?:\d{1,4}[A-Za-z]?|[IVX]{1,4}))?|(?:LT|CR|SH|LH|TH)[- ]?(?:\d{1,3}|[IVX]{1,4})\b))\b/i;
 const ONLINE = /\b(zoom|google meet|ms teams|microsoft teams|webex|youtube live)\b/i;
 const HINDI_PLACE = /((?:कमरा|कक्ष|कमरे|हॉल|सभागार|प्रयोगशाला|लैब|पुस्तकालय|मैदान)\s*(?:नं\.?|संख्या|नंबर)?\s*[\dA-Za-z०-९-]*)/u;
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
@@ -257,7 +258,9 @@ function tableRow(u, ud, ut) {
   return null;
 }
 
-export function parseNotice(text, { pastedAt = new Date() } = {}) {
+// `source`: 'ocr' or 'pdf-scan' when the text came out of a photo. Every dated event then carries one amber flag,
+// because OCR errors are silent (a 3 read as 8): the student confirms each event once before anything is exported.
+export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {}) {
   const result = { anchorDate: null, events: [], pending: [], notes: [], warnings: [] };
   if (typeof text !== 'string' || !text.trim()) {
     result.warnings.push({ level: 'error', msg: 'Paste a notice first. It needs at least one sentence with a date or a time, for example "Test on 13 Nov at 10 AM".' });
@@ -422,6 +425,7 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
         ev.flags.push({ field: 'date', level: 'warn', msg: `The notice says "${named.raw}" but ${prettyDate(d.date)} is a ${WEEKDAY_NAMES[weekdayOf(d.date)]}. Check which one is right.` });
       }
       if (firstDate) dayChecks(ev, d.date);
+      if (d.nameFix && firstDate) ev.flags.push({ field: 'date', level: 'info', msg: `Read "${d.nameFix.from}" as ${d.nameFix.to}.` });
     } else {
       ev.flags.push({ field: 'date', level: 'warn', msg: 'No date found in this part of the notice. Pick the date.' });
     }
@@ -487,6 +491,7 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
     if (ev.zoom && !(ev.link && /zoom/i.test(ev.link))) ev.flags.push({ field: 'venue', level: 'warn', msg: 'The Zoom link is not in this message.' });
     if (!ev.venue && ev.link) { ev.venue = 'Online'; ev.why.venue = 'A joining link is given.'; }
     if (ev.end && toMin(ev.end) <= toMin(ev.start)) ev.flags.push({ field: 'end', level: 'warn', msg: 'End time is before the start. Please fix it.' });
+    if (source !== 'text' && ev.date) ev.flags.push({ field: 'date', level: 'warn', msg: 'Read from a photo: check the date and time against the picture.' });
     delete ev.unit;
   }
   result.events = events;

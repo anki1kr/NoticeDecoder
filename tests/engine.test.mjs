@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { parseNotice } from '../app/engine/parse.js';
 import { findClashes } from '../app/engine/clash.js';
 import { toICS, gcalUrl } from '../app/engine/ics.js';
+import { fixOcrText, normalizeNames } from '../app/engine/ocrfix.js';
 
 const pastedAt = new Date(2026, 9, 14, 10, 0); // 14 Oct 2026, local time
 const read = (f) => fs.readFileSync(new URL(`../examples/${f}`, import.meta.url), 'utf8');
@@ -252,6 +253,56 @@ test('"Today" is the notice date only beside a Date: line; a report-by line is n
   const broken = [{ id: 'a', title: 'A', type: 'test', date: '2026-11-13', start: '10:00', end: '09:00', flags: [] }, { id: 'b', title: 'B', type: 'lecture', date: '2026-11-13', start: '10:30', end: '11:30', flags: [] }];
   assert.equal(findClashes(broken)[0].kind, 'overlap'); // A runs 10:00-11:00 by the 1 h rule, same as the timeline
   assert.match(toICS([{ id: 'm', title: '', type: 'other', date: '2026-11-13', start: '10:00', flags: [] }]), /SUMMARY:Event/);
+});
+
+
+// 2026-10-15 evening: photos and PDFs (OCR cleanup, typo-tolerant names, the photo trust rule).
+test('Typo-tolerant month and weekday names, same length, offsets kept; ordinary words untouched', () => {
+  const { text, fixes } = normalizeNames('Test on Thrusday 13 Nvo 2026 at 10 AM. Many thanks, see you in May.');
+  assert.equal(text, 'Test on Thursday 13 Nov 2026 at 10 AM. Many thanks, see you in May.');
+  assert.deepEqual(fixes.map((f) => [f.from, f.to]), [['Thrusday', 'Thursday'], ['Nvo', 'Nov']]);
+  const [e] = one('Internal Test 2 on 13 Nvo 2026 at 10 AM in Room 204.');
+  assert.equal(e.date, '2026-11-13');
+  assert.ok(e.flags.some((f) => f.level === 'info' && /Read "Nvo" as Nov/.test(f.msg)));
+  assert.equal(one('Seminar on 20 Sepetmber 2026 at 3 PM in Hall B.')[0].date, '2026-09-20');
+  assert.equal(normalizeNames('mar man many sat set mon moon').fixes.length, 0);
+});
+
+test('OCR cleanup: O/l inside numbers, glued AM/PM, odd dashes, broken words, table pipes', () => {
+  const t = fixOcrText('Internal Test 2 on l3 Nov 2O26 from 1O:OO AM to 11:3O AM in Room2O4.\nLab records must be submit-\nted by 12:00 noon.\n| 14 Nov | Physics | 10 AM ~ 1 PM |');
+  assert.match(t, /on 13 Nov 2026 from 10:00 AM to 11:30 AM in Room 204/);
+  assert.match(t, /submitted by 12:00 noon/);
+  assert.match(t, /14 Nov\s{2}Physics\s{2}10 AM - 1 PM/);
+  const ev = parseNotice(t, { pastedAt, source: 'ocr' }).events;
+  assert.equal(ev[0].date, '2026-11-13');
+  assert.deepEqual([ev[0].start, ev[0].end, ev[0].venue], ['10:00', '11:30', 'Room 204']);
+});
+
+test('Photo source: every dated event is amber once ("check against the picture"); typed text is not', () => {
+  const photo = parseNotice(read('01-pdf-sample.txt'), { pastedAt, source: 'ocr' }).events;
+  assert.equal(photo.length, 3);
+  assert.ok(photo.every((e) => e.flags.some((f) => f.level === 'warn' && /photo/.test(f.msg))));
+  const typed = parseNotice(read('01-pdf-sample.txt'), { pastedAt }).events;
+  assert.ok(typed.every((e) => !e.flags.some((f) => f.level === 'warn')));
+});
+
+test('Multi-day runs are checked on every day: an exam inside a six-day practical run is a clash on that day', () => {
+  const ev = one('End-semester practicals from 25 Oct 2026 to 30 Oct 2026, 9:30 AM to 12:30 PM daily in the Computer Centre.\nMaths exam on 27 Oct 2026 at 10 AM in Room 1.\nViva on 2 Nov 2026 at 10 AM in Lab 2.');
+  const c = findClashes(ev);
+  const hit = c.filter((x) => x.kind !== 'none');
+  assert.equal(hit.length, 1);
+  assert.equal(hit[0].date, '2026-10-27');
+  assert.match(hit[0].msg, /^Clash on 27 Oct 2026\./);
+  assert.ok(!c.some((x) => x.date === '2026-11-02'), 'the viva is after the run: no row');
+});
+
+test('Campus venue codes: LT-3, CR 2, Lab-II, Block A-204, Seminar Hall 1', () => {
+  const v = (t) => one(t)[0].venue;
+  assert.equal(v('Guest lecture on 13 Nov 2026 at 11 AM in LT-3.'), 'LT-3');
+  assert.equal(v('Tutorial on 13 Nov 2026 at 2 PM in CR 2.'), 'CR 2');
+  assert.equal(v('Practical on 13 Nov 2026 at 2 PM in Lab-II.'), 'Lab-II');
+  assert.equal(v('Meeting on 13 Nov 2026 at 2 PM in Block A-204.'), 'Block A-204');
+  assert.equal(v('Seminar on 13 Nov 2026 at 2 PM in Seminar Hall 1.'), 'Seminar Hall 1');
 });
 
 console.log(`\n${passed} passed`);

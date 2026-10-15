@@ -130,6 +130,19 @@ export async function handle(request, env) {
       return json({ id: m[1], added, updated, count: live.length, clashes, feed: `${url.origin}/c/${m[1]}.ics`, page: `${url.origin}/c/${m[1]}` });
     }
 
+    // CR console: everything published, with the term-wide clash report (Bearer only; students use /c/:id.json)
+    m = /^\/api\/class\/([a-z0-9]+)\/events$/.exec(path);
+    if (request.method === 'GET' && m) {
+      const cls = await loadClass(env, m[1]);
+      if (!cls) return json({ error: 'No such class.' }, 404);
+      if (!(await authed(request, cls))) return json({ error: 'Wrong or missing class secret.' }, 401);
+      const all = Object.values(cls.events).map((e) => ({ ...e, id: e.uid })).sort((a, b) => `${a.date}${a.start || ''}`.localeCompare(`${b.date}${b.start || ''}`));
+      const live = all.filter((e) => !e.cancelled);
+      const byId = new Map(live.map((e) => [e.id, e]));
+      const clashes = findClashes(live).filter((c) => c.kind !== 'none').map((c) => ({ a: byId.get(c.a).title, b: byId.get(c.b).title, date: byId.get(c.a).date, msg: c.msg, action: c.action }));
+      return json({ id: m[1], name: cls.name, updatedAt: cls.updatedAt, events: all, clashes, feed: `${url.origin}/c/${m[1]}.ics`, page: `${url.origin}/c/${m[1]}` });
+    }
+
     // Cancel one event
     m = /^\/api\/class\/([a-z0-9]+)\/events\/([^/]+)$/.exec(path);
     if (request.method === 'DELETE' && m) {
@@ -150,9 +163,15 @@ export async function handle(request, env) {
       const cls = await loadClass(env, m[1]);
       if (!cls) return text('No such class.', 404, 'text/plain; charset=utf-8');
       const events = Object.values(cls.events).map((e) => ({ ...e, id: e.uid }));
-      const cache = { 'cache-control': 'public, max-age=300' };
+      // Pollers (the Android app every 15 min, calendar apps) get a 304 until something was published.
+      const etag = `"${await sha256(`${m[1]}:${cls.updatedAt}:${m[2] || 'page'}`)}"`;
+      if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: { etag, ...cors() } });
+      const cache = { 'cache-control': 'public, max-age=300', etag };
       if (m[2] === '.ics') {
-        return text(toICS(events, { calName: cls.name, now: new Date(cls.updatedAt) }), 200, 'text/calendar; charset=utf-8', { ...cache, 'content-disposition': `inline; filename="${m[1]}.ics"` });
+        // Apple and Outlook honour the refresh hints; Google ignores them (12 to 24 h on its own schedule).
+        const ics = toICS(events, { calName: cls.name, now: new Date(cls.updatedAt) })
+          .replace('X-WR-TIMEZONE:', `X-WR-CALDESC:Class notices published with Notice Decoder\r\nREFRESH-INTERVAL;VALUE=DURATION:PT1H\r\nX-PUBLISHED-TTL:PT1H\r\nX-WR-TIMEZONE:`);
+        return text(ics, 200, 'text/calendar; charset=utf-8', { ...cache, 'content-disposition': `inline; filename="${m[1]}.ics"` });
       }
       if (m[2] === '.json') return json({ id: m[1], name: cls.name, updatedAt: cls.updatedAt, events }, 200, cache);
       return text(subscribePage(cls, m[1], url.origin, env.APP_URL), 200, 'text/html; charset=utf-8', cache);

@@ -1,7 +1,7 @@
 // Clash rules from the problem statement:
 // two events clash when each starts before the other ends; a deadline (or any "by" time) is a point
 // and clashes when it falls inside another event.
-import { toMin, fromMin, fmt12 } from './dates.js';
+import { toMin, fromMin, fmt12, addDays, prettyDate } from './dates.js';
 
 // A deadline or a "by 9 PM" time is a point. Any other event without an end lasts its duration, or 1 hour,
 // the same length the calendar file and the timeline use.
@@ -31,16 +31,28 @@ function freeBefore(t, sameDay) {
 
 export function findClashes(events) {
   // An end before the start (a typo, or an edit in progress) counts as "no end", exactly as the timeline draws it.
-  const timed = events.filter((e) => e.date && e.start);
+  // A multi-day event (repeat = n days, "practicals 25 to 30 Oct") is checked on every day it runs: a row's `date`
+  // says which day the clash is on, so a one-day exam inside a six-day practical run is reported.
+  const timed = [];
+  for (const e of events) {
+    if (!e.date || !e.start) continue;
+    const days = Math.max(1, Math.min(Number(e.repeat) || 1, 31));
+    for (let k = 0; k < days; k++) timed.push(k === 0 ? e : { ...e, date: addDays(e.date, k), _day: k + 1 });
+  }
   const rows = [];
   for (let i = 0; i < timed.length; i++) {
     for (let j = i + 1; j < timed.length; j++) {
       const [a, b] = [timed[i], timed[j]];
-      if (a.date !== b.date) continue;
-      rows.push(compare(a, b, timed.filter((e) => e.date === a.date)));
+      if (a.date !== b.date || a.id === b.id) continue;
+      const row = compare(a, b, timed.filter((e) => e.date === a.date));
+      row.date = a.date;
+      if (a._day || b._day) row.msg = row.msg.replace(/^(No clash|Clash)\./, `$1 on ${prettyDate(a.date)}.`);
+      rows.push(row);
     }
   }
-  return rows;
+  // Same pair on several days (two multi-day runs): keep one row per pair per verdict, the first day.
+  const seen = new Set();
+  return rows.filter((r) => { const k = `${r.a}|${r.b}|${r.kind}`; if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 function compare(a, b, sameDay) {
