@@ -37,7 +37,7 @@ Judging: Completeness 35, Monetization 30, Innovation 20, UI/UX 15. The PS text 
 | `tests/engine.test.mjs` | engine tests (node only, no framework) |
 | `examples/` | real notices + expected answers |
 | `docs/PITCH.md` | demo script, judge Q&A, money |
-| `deck/build_deck.py`, `tools/deck-shots.mjs` | builds the 6-slide PPTX (+PDF) in the SETU PS-02 look from app screenshots and live test numbers |
+| `deck/build_deck.py`, `tools/deck-shots.mjs` | builds the 6-slide PPTX on the SIH template frame (SETU wordmark), one app highlighter colour per slide, from app screenshots and live test numbers |
 | `research/` | market research; `SYNTHESIS.md` is the summary, `06-public-competitors.md` the code-checked competitor table |
 
 ## Commands
@@ -61,6 +61,8 @@ PDF of the deck: `powershell -File ~/.claude/skills/sih-deck/scripts/render.ps1 
 
 ## Traps
 
+- `python deck/build_deck.py` re-runs `tools/bundle-engine.mjs` and `companion/scripts/sync-engine.mjs`; on Windows they rewrite `dist/notice-engine.js` and `companion/engine/notice-engine.js` with LF only. Check `git diff --ignore-cr-at-eol` and `git restore` them when only line endings changed.
+- On the owner's PC Playwright lives in `Desktop/Coding/DSA-Tracker/frontend-next` (`PLAYWRIGHT_DIR`); a deck open in PowerPoint is locked, so build to `DECK_OUT=tmp/deck/preview.pptx` until it is closed.
 - `app/engine/*.js` use CRLF line endings: a multi-line search-and-replace must match `\r\n` (normalise or use an editor tool).
 - `app.js` `workingCopy()` copies engine fields one by one. A new engine field (e.g. `repeat`, `link`, `point`, `window`, `reportAt`)
   must be added there too, or the UI silently drops it from the calendar export. The share link (`shareUrl()` / `loadShared()`,
@@ -89,5 +91,5 @@ PDF of the deck: `powershell -File ~/.claude/skills/sih-deck/scripts/render.ps1 
 ## Deploy
 
 Repo `anki1kr/NoticeDecoder`. GitHub Pages deploys from the `master` branch root (Settings > Pages > Deploy from a branch),
-so the README is the landing page and the app is **https://anki1kr.me/NoticeDecoder/app/** (the account's Pages use the custom
+a root `index.html` redirects to `app/`, so the site root opens the app at **https://anki1kr.me/NoticeDecoder/app/** (the account's Pages use the custom
 domain `anki1kr.me`; `anki1kr.github.io/NoticeDecoder/` redirects there). `.github/workflows/pages.yml` only runs the engine tests.
