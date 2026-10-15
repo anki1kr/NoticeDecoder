@@ -1,0 +1,16 @@
+# Class feed Worker. Free plan is enough (100k requests/day, KV 1k writes/day).
+# Deploy once:
+#   cd worker && npx wrangler login
+#   npx wrangler kv namespace create CLASSES          # paste the printed id below
+#   npx wrangler deploy                               # prints https://notice-decoder-feed.<account>.workers.dev
+# Then put that URL in app/config.js as FEED_BASE.
+name = "notice-decoder-feed"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+APP_URL = "https://anki1kr.me/NoticeDecoder/app/"
+
+[[kv_namespaces]]
+binding = "CLASSES"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

@@ -173,4 +173,85 @@ test('A cancelled item is not added; same start time is a clash', () => {
   assert.notEqual(findClashes(same)[0].kind, 'none');
 });
 
+
+// 2026-10-15: cases that silently went wrong before (see examples/04-06).
+test('Same type, same hour: two events and a clash, not one merged card', () => {
+  const ev = one(read('05-same-hour-tests.txt'));
+  assert.deepEqual(ev.map((e) => e.title), ['Internal test: Maths', 'Guest lecture: Cloud Basics', 'Lab exam: Physics', 'Assignment 2 upload']);
+  const clashes = findClashes(ev).filter((c) => c.kind !== 'none');
+  assert.equal(clashes.length, 2);
+  const lab = ev.find((e) => /Physics/.test(e.title));
+  assert.deepEqual([lab.end, lab.reportAt, lab.venue], ['12:00', '09:30', 'Lab 2']);
+  const up = ev.find((e) => e.type === 'deadline');
+  assert.deepEqual([up.date, up.start], ['2026-11-13', '17:00']);
+  assert.ok(up.flags.some((f) => f.level === 'warn' && /EOD/.test(f.msg)));
+});
+
+test('One sentence, two events: cut at "and" when both halves have a time and an event word', () => {
+  const ev = one('Internal Test 2 on 13 Nov 2026 at 10 AM in Room 204 and a guest lecture at 11 AM in the Seminar Hall.');
+  assert.deepEqual(ev.map((e) => [e.title, e.date, e.start, e.venue]), [['Internal Test 2', '2026-11-13', '10:00', 'Room 204'], ['Guest lecture', '2026-11-13', '11:00', 'Seminar Hall']]);
+  // "16 and 17 Oct" and a plain time range are never cut
+  assert.equal(one('Hackathon CodeFest on 16 and 17 Oct 2026 from 9 AM to 6 PM in Block C.').length, 1);
+});
+
+test('Exam timetable rows: subject titles, kind from the header, rooms from the cells, no false contradiction', () => {
+  const r = parseNotice(read('04-exam-timetable.txt'), { pastedAt });
+  assert.deepEqual(r.events.map((e) => [e.title, e.typeLabel, e.date, e.start, e.end, e.venue]), [
+    ['DBMS exam', 'Exam', '2026-11-13', '10:00', '13:00', 'Room 101'],
+    ['Operating Systems exam', 'Exam', '2026-11-14', '10:00', '13:00', 'Room 101'],
+    ['Computer Networks exam', 'Exam', '2026-11-16', '14:00', '17:00', 'Room 102'],
+    ['Practical viva: DBMS', 'Viva', '2026-11-14', '11:00', null, 'Lab 2'],
+    ['Hall tickets collection', 'Deadline', '2026-11-12', '16:00', null, 'Office'],
+  ]);
+  assert.ok(!r.warnings.some((w) => /two different dates/.test(w.msg)));
+  assert.equal(findClashes(r.events).filter((c) => c.kind !== 'none').length, 1); // viva inside the OS exam
+});
+
+test('Weekday that contradicts the date is flagged; "7/10" and "Unit 3/4" are not dates', () => {
+  const [e] = one('Internal Test 2 on Thursday, 13 Nov 2026 at 10 AM in Room 204.');
+  assert.equal(e.date, '2026-11-13');
+  assert.ok(e.flags.some((f) => f.level === 'warn' && /Thursday.*Friday/.test(f.msg)));
+  assert.equal(one('Friday, 13 Nov 2026: Internal Test 2 at 10 AM.')[0].flags.filter((f) => f.level === 'warn').length, 0);
+  const [q] = one('Minimum 7/10 marks required in the quiz on 13 Nov 2026 at 10 AM.');
+  assert.equal(q.date, '2026-11-13');
+  assert.equal(one('Unit 3/4 revision class on 20 Nov 2026 at 9 AM.')[0].date, '2026-11-20');
+});
+
+test('Gazetted holiday and Sunday are pointed out, never moved', () => {
+  const [d] = one('Seminar on 8 Nov 2026 at 10 AM in Hall A.');
+  assert.equal(d.date, '2026-11-08');
+  assert.ok(d.flags.some((f) => f.level === 'warn' && /Diwali/.test(f.msg)));
+  const [s] = one('Placement drive on 15 Nov 2026 at 9 AM in the Auditorium.');
+  assert.ok(s.flags.some((f) => f.level === 'info' && /Sunday/.test(f.msg)));
+  assert.equal(s.flags.filter((f) => f.level === 'warn').length, 0);
+});
+
+test('More formats: ISO date, "0700 hrs", "between 9 and 11", "starts at 10 and ends by 1", mid sem, fee payment', () => {
+  const [a] = one('Submit the assignment by 2026-11-20 11:59 PM on the portal.');
+  assert.deepEqual([a.title, a.type, a.date, a.start], ['Assignment submission', 'deadline', '2026-11-20', '23:59']);
+  const [p] = one('NCC parade on 14 Nov 2026 at 0700 hrs. Reporting 0630 hrs at the ground.');
+  assert.deepEqual([p.start, p.reportAt, p.flags.filter((f) => f.level === 'warn').length], ['07:00', '06:30', 0]);
+  assert.deepEqual(one('Viva will be held between 9 AM and 11 AM on 14 Nov 2026 in Lab 3.').map((e) => [e.start, e.end]), [['09:00', '11:00']]);
+  assert.deepEqual(one('The exam will start at 10 AM and end by 1 PM on 13 Nov 2026 in Hall A.').map((e) => [e.start, e.end]), [['10:00', '13:00']]);
+  assert.equal(one('Mid sem on 5 Nov 2026, 10 AM, Room 7.')[0].type, 'test');
+  const [f] = one('Pay the fee of Rs 1500 by 20 Nov 2026 at the accounts office. Contact 98765 43210 for queries.');
+  assert.deepEqual([f.title, f.type, f.date, f.venue], ['Fee payment', 'deadline', '2026-11-20', 'Accounts office']);
+});
+
+test('Hindi notice: Devanagari months, "सुबह 10 बजे", परीक्षा and a तक deadline', () => {
+  const ev = one(read('06-hindi-notice.txt'));
+  assert.deepEqual(ev.map((e) => [e.title, e.type, e.date, e.start, e.venue]), [['गणित परीक्षा', 'test', '2026-11-13', '10:00', 'कमरा 204'], ['प्रोजेक्ट रिपोर्ट जमा', 'deadline', '2026-11-12', null, null]]);
+});
+
+test('"Today" is the notice date only beside a Date: line; a report-by line is not a second event; end before start stays in the clash check', () => {
+  const r = parseNotice('Today is the last day to collect ID cards. Fest on 20 Nov 2026 at 10 AM in the Main Ground.', { pastedAt });
+  assert.equal(r.anchorFromNotice, false);
+  assert.deepEqual(r.events.map((e) => e.date), ['2026-10-14', '2026-11-20']);
+  const ev = one('Campus drive by TCS on 18 Nov 2026.\nReporting time: 8:30 AM\nTime: 10:00 AM\nVenue: Auditorium');
+  assert.deepEqual([ev.length, ev[0].start, ev[0].reportAt], [1, '10:00', '08:30']);
+  const broken = [{ id: 'a', title: 'A', type: 'test', date: '2026-11-13', start: '10:00', end: '09:00', flags: [] }, { id: 'b', title: 'B', type: 'lecture', date: '2026-11-13', start: '10:30', end: '11:30', flags: [] }];
+  assert.equal(findClashes(broken)[0].kind, 'overlap'); // A runs 10:00-11:00 by the 1 h rule, same as the timeline
+  assert.match(toICS([{ id: 'm', title: '', type: 'other', date: '2026-11-13', start: '10:00', flags: [] }]), /SUMMARY:Event/);
+});
+
 console.log(`\n${passed} passed`);

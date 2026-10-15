@@ -30,7 +30,8 @@ function freeBefore(t, sameDay) {
 }
 
 export function findClashes(events) {
-  const timed = events.filter((e) => e.date && e.start && (!e.end || toMin(e.end) > toMin(e.start)));
+  // An end before the start (a typo, or an edit in progress) counts as "no end", exactly as the timeline draws it.
+  const timed = events.filter((e) => e.date && e.start);
   const rows = [];
   for (let i = 0; i < timed.length; i++) {
     for (let j = i + 1; j < timed.length; j++) {
@@ -75,7 +76,7 @@ function compare(a, b, sameDay) {
         : `Ask the coordinator whether you can leave ${name(ev, p)} for it.`;
       return { ...base, kind: 'deadline-inside', msg: `Clash. ${what} falls during ${name(ev, p)} (${range(s, e)}).`, action };
     }
-    const rel = t <= s ? `before ${name(ev, p)} starts at ${fmt12(ev.start)}` : `after ${name(ev, p)} ends at ${fmt12(ev.end)}`;
+    const rel = t <= s ? `before ${name(ev, p)} starts at ${fmt12(ev.start)}` : `after ${name(ev, p)} ends at ${fmt12(fromMin(e))}`;
     return { ...base, kind: 'none', msg: `No clash. ${what} ${is} ${rel}.` };
   }
   const from = Math.max(as, bs), to = Math.min(ae, be);
@@ -85,7 +86,7 @@ function compare(a, b, sameDay) {
       action: `Ask the coordinator about "${later.title}", or decide which one to attend; ${to - from} minutes overlap.` };
   }
   const [first, second] = as < bs ? [a, b] : [b, a];
-  return { ...base, kind: 'none', msg: `No clash. ${cap(name(first, second))} ends at ${fmt12(first.end)}, before ${name(second, first)} starts at ${fmt12(second.start)}.` };
+  return { ...base, kind: 'none', msg: `No clash. ${cap(name(first, second))} ends at ${fmt12(fromMin(endOf(first)))}, before ${name(second, first)} starts at ${fmt12(second.start)}.` };
 }
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);

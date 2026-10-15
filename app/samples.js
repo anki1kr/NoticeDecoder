@@ -109,4 +109,15 @@ Interview Rounds:
 -Joining dates will be confirmed to the selected students, once after discussion with the Placement Officer.
 `,
   },
+  {
+    id: 'timetable',
+    label: 'Exam timetable',
+    text: `Dept. of CSE, III Year - End Semester Exam schedule:
+Thursday, 13 Nov 2026 - DBMS - 10 AM to 1 PM - Room 101
+14 Nov 2026 - Operating Systems - 10 AM to 1 PM - Room 101
+16 Nov 2026 - Computer Networks - 2 PM to 5 PM - Room 102
+Practical viva for DBMS on 14 Nov 2026 at 11 AM in Lab 2.
+Hall tickets must be collected from the office by 12 Nov 2026, 4 PM. Minimum 75/100 attendance required.
+`,
+  },
 ];

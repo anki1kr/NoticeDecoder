@@ -1,3 +1,9 @@
 tmp/
 node_modules/
 .env
+companion/node_modules/
+companion/android/
+companion/ios/
+companion/.expo/
+worker/node_modules/
+worker/.wrangler/

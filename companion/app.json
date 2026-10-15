@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Notice Decoder",
+    "slug": "notice-decoder-companion",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "noticedecoder",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "android": {
+      "package": "me.anki1kr.noticedecoder",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.FOREGROUND_SERVICE"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#3d2c8d",
+        "foregroundImage": "./assets/icon.png"
+      }
+    },
+    "icon": "./assets/icon.png",
+    "plugins": [
+      "expo-dev-client",
+      ["expo-calendar", { "calendarPermission": "Notice Decoder writes the events it finds in your class notices into a calendar you choose." }],
+      ["expo-notifications", { "icon": "./assets/icon.png", "color": "#3d2c8d" }],
+      "expo-background-task",
+      "./plugins/withNotificationListener.js"
+    ],
+    "extra": {
+      "appUrl": "https://anki1kr.me/NoticeDecoder/app/",
+      "feedBase": ""
+    }
+  }
+}

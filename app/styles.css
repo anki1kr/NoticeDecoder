@@ -271,3 +271,40 @@ a, .link { text-underline-offset: 3px; }
 /* Keep the first and last hour labels inside the box */
 .tl-axis .tl-tick:first-child { transform: none; }
 .tl-axis .tl-tick:last-child { transform: translateX(-100%); }
+
+/* Header row with the install button */
+.head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+#offline-note { color: var(--amber); font-weight: 600; }
+
+/* Class link banner: the page opened from a shared link, there is no notice text to show */
+.shared-banner { border-color: var(--accent); background: var(--accent-soft); }
+.shared-banner h2 { margin-bottom: 4px; }
+.shared-banner .hint { margin: 0; color: var(--text); }
+
+/* Clean events: one line each, the full card only when something needs eyes */
+.row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; font-size: 15px;
+}
+.row .dot { margin-right: 0; }
+.row-when { font-weight: 600; white-space: nowrap; }
+.row-title { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.row-venue { color: var(--muted); }
+.row-actions { display: flex; gap: 8px; margin-left: auto; }
+.row-actions .link { padding: 4px 6px; font-size: 14px; }
+.row .badge { font-size: 13px; }
+@media (min-width: 820px) { .events .row { grid-column: 1 / -1; } }
+
+/* Export and share */
+.share-hint { margin-top: 16px; }
+#gcal-note { margin: 8px 0 4px; }
+.join-row { align-items: stretch; }
+.join-row input { flex: 1 1 220px; }
+#class-section .lbl { margin-top: 16px; }
+.status .link { font-size: inherit; padding-left: 4px; }
+.undo { color: var(--text); }
+.undo .link { padding-left: 2px; font-size: 14px; }
+.fallback-copy { margin-top: 10px; font-size: 14px; }
+input[type="number"] { -moz-appearance: textfield; }
+input[type="url"] { overflow-wrap: anywhere; }
+.open-link { display: inline-flex; align-items: center; text-decoration: none; }

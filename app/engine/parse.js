@@ -1,36 +1,66 @@
 // Notice -> events. Pure rules, no AI: every field records the rule that set it (why) and the
 // exact words it came from (sources), so the UI can explain and highlight each result.
-import { findDates, findTimes, findDurations, iso, addDays, daysBetween, prettyDate, localISO, fmt12, toMin, fromMin } from './dates.js';
+import { findDates, findTimes, findDurations, iso, addDays, daysBetween, prettyDate, localISO, fmt12, toMin, fromMin, weekdayOf, WEEKDAY_NAMES } from './dates.js';
+import { holidayOn } from './holidays.js';
 
 // Keyword families, checked in this order. type = one of the problem statement's types.
 const FAMILIES = [
   // A deadline phrase wins over the topic it is about: "last date to pay the exam fee" is a deadline, not an exam.
-  { fam: 'deadline', type: 'deadline', re: /\b(last date|deadline|due date|(?:submit|register|apply|pay)\w*\s+(?:by|before)|clos(?:es|ing date))\b/i },
+  { fam: 'deadline', type: 'deadline', re: /\b(last date|last day|deadline|due date|(?:submit|register|apply|pay|upload|fill|collect|return|send|mail|complete|deposit)\w*\s+(?:by|before|on or before|latest by)|(?:must|should|have to|has to|need to|needs to|are to|is to)\s+be\s+\w+(?:ed|t)\b[^.\n]{0,40}?\b(?:by|before|latest by|on or before)\b|clos(?:es|ing date))\b/i },
+  { fam: 'deadline', type: 'deadline', re: /(अंतिम तिथि|अंतिम दिनांक|जमा करन[ेा]|जमा कर)/u },
   { fam: 'gd', type: 'test', re: /\b(?:[Gg]roup [Dd]iscussions?|GD)\b/ },
   { fam: 'interview', type: 'test', re: /\binterviews?\b/i },
-  { fam: 'results', type: 'other', re: /\bresults?\b/i },
-  { fam: 'test', type: 'test', re: /\b(internal tests?|unit tests?|class tests?|mid[- ]?terms?(?: exams?| tests?)?|end[- ]?sem(?:ester)?(?: (?:exams?|practicals?))?|examinations?|exams?|tests?|quiz(?:zes)?|viva(?: voce)?|practicals?|assessments?|aptitude)\b/i },
-  { fam: 'deadline', type: 'deadline', re: /\b(submissions?|submit(?:ted)?|deadline|last date|due(?! to)(?: date)?|registrations?)\b/i },
-  { fam: 'lecture', type: 'lecture', re: /\b(guest lectures?|lectures?|classes|seminars?(?!\s+(?:hall|room))|webinars?|workshops?|sessions?|orientation|talks?|trainings?)\b/i },
-  { fam: 'other', type: 'other', re: /\b(placement drives?|drives?|fests?|hackathons?|meetings?|ceremony|competitions?|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
+  { fam: 'results', type: 'other', re: /\bresults?\b|परिणाम/i },
+  { fam: 'test', type: 'test', re: /\b(practical vivas?|lab vivas?|internal tests?|unit tests?|class tests?|slip tests?|surprise tests?|mock tests?|mid[- ]?(?:terms?|sems?|semesters?)(?: exams?| tests?)?|sessionals?(?: exams?)?|end[- ]?sem(?:ester)?(?: (?:exams?|practicals?))?|semester exams?|model exams?|lab exams?|re-?exams?|supplementary(?: exams?)?|backlog exams?|internal assessments?|examinations?|exams?|tests?|quiz(?:zes)?|viva(?: voce)?|practicals?|assessments?|aptitude|olympiad)\b/i },
+  { fam: 'test', type: 'test', re: /(परीक्षा|टेस्ट|क्विज़|क्विज|प्रैक्टिकल|मौखिकी)/u },
+  // Exam acronyms are case-sensitive on purpose: "see" and "cat" are ordinary words.
+  { fam: 'test', type: 'test', re: /(CIE|SEE|CAT[- ]?[12]|FAT|MST|EST)/ },
+  { fam: 'deadline', type: 'deadline', re: /\b(submissions?|submit(?:ted)?|upload(?:ed|ing)?|deadline|last date|due(?! to)(?: date)?|registrations?|fee payment|fees?|pay(?:ment)?)\b/i },
+  { fam: 'lecture', type: 'lecture', re: /\b(guest lectures?|expert lectures?|lectures?|classes|tutorials?|seminars?(?!\s+(?:hall|room))|webinars?|workshops?|masterclass(?:es)?|bootcamps?|sessions?|orientation|induction|talks?|trainings?)\b/i },
+  { fam: 'lecture', type: 'lecture', re: /(व्याख्यान|कक्षा|सेमिनार|कार्यशाला|वेबिनार|सत्र)/u },
+  { fam: 'other', type: 'other', re: /\b(placement drives?|campus drives?|pool campus|drives?|fests?|hackathons?|meetings?|ceremony|convocation|competitions?|sports day|annual day|farewell|freshers?(?:['’]s)? party|cultural (?:fest|event|night)|parade|camp|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
+  { fam: 'other', type: 'other', re: /(कार्यक्रम|प्रतियोगिता|बैठक|समारोह|उत्सव)/u },
 ];
 const TYPE_LABEL = { test: 'Test', deadline: 'Deadline', lecture: 'Lecture', other: 'Event' };
 const TYPE_PHRASE = { test: 'a test', deadline: 'a deadline', lecture: 'a lecture or talk', other: 'an event' };
 const REVISED = /\b(postponed|rescheduled|preponed|pre-poned|shifted|moved|changed|deferred)\s+(?:to|till|until|on)\b/i;
-const RANGE_JOIN = /^\s*(?:,|and|&|to|till|until|-|–)\s*$/i;
+const RANGE_JOIN = /^\s*(?:,|and|&|to|till|until|-|–|aur|और|व|से)\s*$/i;
 
-const LABEL_LINE = /^[^\p{L}\p{N}\n]*\s*(date|day|time|timings?|venue|place|location|platform|mode|eligibility|participation|duration|reporting time)\s*[:\-–]/iu;
+const LABEL_LINE = /^[^\p{L}\p{N}\n]*\s*(date|day|time|timings?|venue|place|location|platform|mode|eligibility|participation|duration|reporting time|दिनांक|तिथि|समय|स्थान)\s*[:\-–]/iu;
 const VAGUE = /\b((?:this|next|coming)\s+(?:week|month)(?:\s+or\s+(?:this|next)\s+(?:week|month))?|next working days?|will be (?:confirmed|announced|intimated|informed|notified|decided)|to be (?:announced|decided|confirmed|notified)|TBD|TBA)\b/i;
-const DEADLINE_CUE = /\b(by|before|latest by|not later than|within|till|until)\b[^.\n]{0,25}$/i;
+const DEADLINE_CUE = /\b(by|before|latest by|not later than|within|till|until|on or before|तक)\b[^.\n]{0,25}$/iu;
+const END_CUE = /^\W*(?:and\s+)?(?:(?:will\s+|would\s+|should\s+)?(?:ends?|close[sd]?|finish(?:es)?|get over|conclude[sd]?|be over)\s+(?:by|at|around)|to|till|until|upto|up to)\W*$/i;
 const NOTE = /^(note\b[\s:\-–]*|please (?:do not|don['’]t|note|ensure|carry|bring)|do not|don['’]t|also ensure|ensure|make sure|carry|bring|mandatory|compulsory|students (?:must|should))/i;
 const STOP = new Set('a an the all our your their his her its this that these those of for to in on at by from with and or is are was were be will can may dear please thanks thank expect steps exactly kindly also free today today’s today\'s you we they it as about into take join have has had see attend attended attending find below details selected shortlisted students student'.split(' '));
-const PLACE = /(?:\b(?:in|at|to|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*)((?:[A-Za-z]+\s+){0,2}?(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b|\s*(?:no\.?\s*)?[A-Z]?-?\d+[A-Za-z]?)?)\b/i;
+// Words that do not tell two events apart: "Test" and "Maths test" may be the same thing, "Maths test" and "Physics test" are not.
+const GENERIC = new Set('event events test tests exam exams quiz deadline lecture lectures class classes session sessions submission registration workshop seminar webinar meeting viva practical practicals drive interview gd group discussion guest internal online offline'.split(' '));
+// Hindi function words that never name an event.
+const HINDI_STOP = 'की का के को में पर से और है हैं होगी होगा होंगे एवं तथा या कि'.split(' ');
+const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*)((?:[A-Za-z]+\s+){0,2}?(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b|\s*(?:no\.?\s*)?[A-Z]?-?\d+[A-Za-z]?)?)\b/i;
 const ONLINE = /\b(zoom|google meet|ms teams|microsoft teams|webex|youtube live)\b/i;
+const HINDI_PLACE = /((?:कमरा|कक्ष|कमरे|हॉल|सभागार|प्रयोगशाला|लैब|पुस्तकालय|मैदान)\s*(?:नं\.?|संख्या|नंबर)?\s*[\dA-Za-z०-९-]*)/u;
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
-const CANCEL = /\b(cancell?ed|cancels?|called off|will not be held|cancel ho gay[ia])\b/i;
+const CANCEL = /\b(cancell?ed|cancels?|called off|will not be held|cancel ho gay[ia]|stands cancelled)\b|रद्द/i;
 const GROUP_INVITE = /chat\.whatsapp\.com|t\.me\/|join (?:the |our )?[^.\n]{0,40}\b(?:whatsapp|telegram) group/i;
+// Timetable rows: "10 Nov 2026 - Maths - 10 AM to 1 PM - Room 1", "Mon | 19/10 | DBMS | 2 PM | Lab 2"
+const CELL_SPLIT = /\s*\|\s*|\t+|\s+[-–—]\s+|\s{3,}/;
+const WEEKDAY_WORD = /^(?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:day|sday|nesday|rsday|urday)?\.?$/i;
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, '');
+const sig = (title) => new Set(title.toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u).filter((w) => w && !STOP.has(w) && !GENERIC.has(w)));
+// The same thing mentioned twice, or two different things? Both titles share a telling word, or one has none.
+function sameThing(a, b) {
+  if (norm(a) === norm(b)) return true;
+  const sa = sig(a), sb = sig(b);
+  // "Test" and "Maths test" may be one thing; "Internal test" and "Lab exam" (two generic names that differ) are two.
+  if (!sa.size && !sb.size) return !/\s/.test(a.trim()) || !/\s/.test(b.trim());
+  if (!sa.size || !sb.size) {
+    const [generic, other] = sa.size ? [b, a] : [a, b];
+    return norm(other).includes(norm(generic)); // "Test" is the "Maths test"; "Practical" is not the "OS exam"
+  }
+  return [...sa].some((w) => sb.has(w));
+}
 
 // 1. Split into units: label blocks ("Date: ... / Time: ...") stay together, other lines split into sentences.
 function units(text) {
@@ -52,7 +82,7 @@ function units(text) {
     const { s, t } = lines[i];
     if (t.trim()) {
       let start = 0;
-      for (const m of t.matchAll(/[.!?](?=\s+["“(]?[A-Z])/g)) { out.push({ s: s + start, e: s + m.index + 1 }); start = m.index + 1; }
+      for (const m of t.matchAll(/[.!?।](?=\s+["“(]?[A-Z\u0900-\u097F])/gu)) { out.push({ s: s + start, e: s + m.index + 1 }); start = m.index + 1; }
       out.push({ s: s + start, e: s + t.length });
     }
     i++;
@@ -63,12 +93,34 @@ function units(text) {
     .map((u) => ({ ...u, text: text.slice(u.s, u.e) }));
 }
 
+// "Internal Test 2 at 10 AM in Room 204 and a guest lecture at 11 AM in the Seminar Hall": one sentence, two events.
+// A sentence is cut at "and" / ";" only when both halves have their own time AND their own event word.
+function splitCompound(us, text, times) {
+  const out = [];
+  for (const u of us) {
+    if (u.block) { out.push(u); continue; }
+    const inside = (s, e) => times.filter((t) => t.s >= s && t.e <= e);
+    if (inside(u.s, u.e).length < 2) { out.push(u); continue; }
+    let cur = u;
+    for (const m of u.text.matchAll(/;\s*|,?\s+(?:and|&|aur|और)\s+/g)) {
+      const p = u.s + m.index, q = p + m[0].length;
+      if (p <= cur.s) continue;
+      const left = text.slice(cur.s, p), right = text.slice(q, u.e);
+      if (!inside(cur.s, p).length || !inside(q, u.e).length || !keyword(left) || !keyword(right)) continue;
+      out.push({ s: cur.s, e: p, text: left, split: true });
+      cur = { s: q, e: u.e, text: right, split: true };
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
 function labelFor(k) {
   const w = k.kw.toLowerCase();
   if (k.fam === 'gd') return 'Group discussion';
   if (k.fam === 'deadline') return 'Deadline';
   if (k.fam === 'results') return 'Results';
-  if (k.fam === 'test') return /quiz/.test(w) ? 'Quiz' : /exam/.test(w) ? 'Exam' : /viva/.test(w) ? 'Viva' : /practical/.test(w) ? 'Practical' : 'Test';
+  if (k.fam === 'test') return /quiz|क्विज/.test(w) ? 'Quiz' : /exam|sem|cie|see|sessional|परीक्षा/.test(w) ? 'Exam' : /viva|मौखिकी/.test(w) ? 'Viva' : /practical|प्रैक्टिकल/.test(w) ? 'Practical' : 'Test';
   return cap(w === 'classes' ? 'class' : w.replace(/s$/, ''));
 }
 
@@ -89,18 +141,19 @@ function keyword(str) {
 function walkTitle(str, kwIndex, kw, lowercaseOk = false) {
   // Stay inside the clause: stop at line breaks, punctuation and list dashes (not hyphens inside words).
   const head = str.slice(0, kwIndex);
-  const cut = Math.max(0, ...[...head.matchAll(/[\n.:;,()[\]!?@]|(?:^|\s)[-–]|[-–]\s/g)].map((m) => m.index + m[0].length));
-  const before = head.slice(cut).split(/[^\p{L}\p{N}'’-]+/u);
+  const cut = Math.max(0, ...[...head.matchAll(/[\n.:;,()[\]!?@।]|(?:^|\s)[-–]|[-–]\s/g)].map((m) => m.index + m[0].length));
+  const before = head.slice(cut).split(/[^\p{L}\p{M}\p{N}'’-]+/u);
   const words = [];
   for (let w = before.length - 1; w >= 0 && words.length < 3; w--) {
     const word = before[w];
     if (!word) { if (w === before.length - 1) continue; break; }
+    if (HINDI_STOP.includes(word)) continue;
     if (STOP.has(word.toLowerCase())) break;
-    if (!lowercaseOk && !/^[\p{Lu}\p{N}]/u.test(word)) break;
+    if (!lowercaseOk && !/^[\p{Lu}\p{N}\p{Script=Devanagari}]/u.test(word)) break;
     words.unshift(word);
   }
   // A trailing number names the event ("Internal Test 2") unless it starts a date ("Lab exam 05/11/2026", "Test 13 Nov").
-  const num = /^\s*(\d{1,2}|[IVX]{1,4})\b(?![/.-]\d)(?!(?:st|nd|rd|th)?\s*(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i.exec(str.slice(kwIndex + kw.length));
+  const num = /^\s*(\d{1,2}|[IVX]{1,4})\b(?![/.-]\d)(?!(?:st|nd|rd|th)?\s*(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|[\u0900-\u097F]))/i.exec(str.slice(kwIndex + kw.length));
   return [...words, kw].join(' ') + (num && !/\d{3,}/.test(num[1]) ? ' ' + num[1] : '');
 }
 
@@ -112,16 +165,35 @@ function titleFor(str, k) {
     const what = `${sub[1] || ''}${sub[2].replace(/s$/i, '')}`.trim();
     return { title: `${cap(what.toLowerCase())} submission`, why: `"${sub[0]}" means a submission.`, at: [sub.index, sub.index + sub[0].length] };
   }
-  const topic = /\b([Ww]orkshop|[Ss]eminar|[Ww]ebinar|[Ll]ecture|[Tt]alk|[Ss]ession|[Qq]uiz|[Hh]ackathon|[Cc]ompetition|[Tt]raining)\s+on\s+((?:[A-Z][\w+#.-]*\s?){1,4})/.exec(str);
+  const passive = /\b((?:[\p{L}\p{N}-]+\s+){0,2}[\p{L}\p{N}-]+)\s+(?:must|should|are to|is to|have to|has to|need to|needs to)\s+be\s+(submitted|collected|returned|uploaded|paid|completed|filled|deposited|sent|mailed|handed over)\b/iu.exec(str);
+  if (passive) {
+    const what = passive[1].split(/\s+/).filter((w, i, a) => !(i < a.length - 1 && STOP.has(w.toLowerCase()))).join(' ');
+    const noun = { submitted: 'submission', collected: 'collection', returned: 'return', uploaded: 'upload', paid: 'payment', completed: 'completion', filled: 'form', deposited: 'deposit', sent: 'submission', mailed: 'submission', 'handed over': 'submission' }[passive[2].toLowerCase()];
+    return { title: `${cap(what)} ${noun}`, why: `"${passive[0]}" says what is due.`, at: [passive.index, passive.index + passive[0].length] };
+  }
+  const hindiDue = /^(.*?)\s*\d{1,2}\s*[\u0900-\u097F]+\s*(?:\d{4})?\s*(?:तक|से पहले)/u.exec(str);
+  if (hindiDue && /[\u0900-\u097F]/.test(k.kw) && hindiDue[1].trim()) {
+    const what = hindiDue[1].replace(/^[^\p{L}]*(?:सूचना|नोट)?[\s:\-–]*/u, '').split(/\s+/).filter((w) => !HINDI_STOP.includes(w)).slice(-3).join(' ');
+    if (what) return { title: `${what} जमा`, why: `"${hindiDue[0].trim()}" = due by that date.`, at: [hindiDue.index, hindiDue.index + hindiDue[0].length] };
+  }
+  const topic = /\b([Ww]orkshop|[Ss]eminar|[Ww]ebinar|[Ll]ecture|[Tt]alk|[Ss]ession|[Qq]uiz|[Hh]ackathon|[Cc]ompetition|[Tt]raining|[Mm]asterclass)\s+on\s+((?:[A-Z][\w+#.-]*\s?){1,4})/.exec(str);
   if (topic && /^[A-Z]/.test(topic[2])) return { title: `${cap(topic[1].toLowerCase())}: ${topic[2].trim()}`, why: `"${topic[0].trim()}" names the topic.`, at: [topic.index, topic.index + topic[0].length] };
-  const last = /\blast date (?:to|for) (?:the )?(.{3,40}?)(?=\s+(?:is|on|:)\b|[,:])/i.exec(str);
+  const last = /\blast (?:date|day) (?:to|for) (?:the )?(.{3,40}?)(?=\s+(?:is|on|:)\b|[,:.!?]|$)/i.exec(str);
   if (last) return { title: cap(last[1]), why: `"${last[0]}" names what is due.`, at: [last.index, last.index + last[0].length] };
-  const by = /\b(submit|register|apply|pay)\w*\s+(?:by|before)\b/i.exec(str);
+  const verbObj = /\b(submit|upload|send|mail|register|pay|fill)\s+(?:your|the|all|their|his|her|in)?\s*([a-z][\w ]{2,40}?)\s+(?:by|before|on or before|latest by|till|not later than)\b/i.exec(str);
+  if (verbObj) {
+    const obj = verbObj[2].split(/\s+(?:of|for|in|on|to|at|through|via)\s+/i)[0].trim();
+    const noun = { submit: 'submission', upload: 'upload', send: 'submission', mail: 'submission', register: 'registration', pay: 'payment', fill: 'form' }[verbObj[1].toLowerCase()];
+    if (obj && !/^\d/.test(obj)) return { title: `${cap(obj.toLowerCase())} ${noun}`, why: `"${verbObj[0]}" says what is due.`, at: [verbObj.index, verbObj.index + verbObj[0].length] };
+  }
+  const by = /\b(submit|register|apply|pay|upload|fill)\w*\s+(?:by|before|on or before|latest by)\b/i.exec(str);
   if (by) {
-    const noun = { submit: 'Submission', register: 'Registration', apply: 'Application', pay: 'Payment' }[by[1].toLowerCase()];
+    const noun = { submit: 'Submission', register: 'Registration', apply: 'Application', pay: 'Payment', upload: 'Upload', fill: 'Form' }[by[1].toLowerCase()];
     return { title: `${noun} deadline`, why: `"${by[0]}" is a deadline.`, at: [by.index, by.index + by[0].length] };
   }
   const t = walkTitle(str, k.i, k.kw, k.fam === 'deadline');
+  const subj = k.fam === 'test' && new RegExp(String.raw`${k.kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\s+(?:in|of|for|on)\s+([A-Z][\w+#&.-]*(?:\s+[A-Z][\w+#&.-]*){0,3})(?=\s+(?:on|at|from|will|is|has|in|by)\b|[,.;:]|$)`).exec(str);
+  if (subj) return { title: `${cap(t)}: ${subj[1]}`, why: `"${subj[0].trim()}" names the subject.`, at: [subj.index, subj.index + subj[0].length] };
   return { title: cap(t), why: `Taken from the words "${t}".` };
 }
 
@@ -144,7 +216,7 @@ function upgradeTitle(title, text, fam) {
 function venueFor(u) {
   if (u.block) {
     for (const l of u.lines) {
-      const v = /(venue|place|location|platform|mode)\s*[:\-–]\s*(.+)$/i.exec(l.t);
+      const v = /(venue|place|location|platform|mode|स्थान)\s*[:\-–]\s*(.+)$/iu.exec(l.t);
       if (!v) continue;
       const val = v[2].trim(), s = l.s + l.t.indexOf(val);
       const online = ONLINE.exec(val) || /^online$/i.exec(val);
@@ -155,6 +227,33 @@ function venueFor(u) {
   if (p) { const s = u.s + p.index + p[0].indexOf(p[1]); return { venue: cap(p[1]), span: [s, s + p[1].length], why: `Place word found: "${p[1]}".` }; }
   const o = ONLINE.exec(u.text);
   if (o) return { venue: `Online (${o[1]})`, span: [u.s + o.index, u.s + o.index + o[0].length], why: `"${o[1]}" means it is online.`, zoom: /zoom/i.test(o[1]) };
+  const h = HINDI_PLACE.exec(u.text);
+  if (h) return { venue: h[1].trim(), span: [u.s + h.index, u.s + h.index + h[1].length], why: `Place word found: "${h[1].trim()}".` };
+  // A timetable cell that is only a place ("Room 101", "Lab 2", "Seminar Hall")
+  if (!u.block) {
+    let pos = 0;
+    for (const c of u.text.split(CELL_SPLIT).map((x) => x.trim()).filter(Boolean)) {
+      const i = u.text.indexOf(c, pos); pos = i + c.length;
+      const m = PLACE.exec(` in ${c}`);
+      if (m && m[1].length >= c.length - 2) return { venue: cap(c), span: [u.s + i, u.s + i + c.length], why: `Place column: "${c}".` };
+    }
+  }
+  return null;
+}
+
+// A timetable row: one line, a date, a time and cells split by " - ", "|" or tabs. The subject cell is the title.
+function tableRow(u, ud, ut) {
+  if (u.block || !ud.some((d) => d.kind === 'abs') || !ut.length) return null;
+  const cells = u.text.split(CELL_SPLIT).map((c) => c.trim()).filter(Boolean);
+  if (cells.length < 3) return null;
+  let pos = 0;
+  for (const c of cells) {
+    const i = u.text.indexOf(c, pos); pos = i + c.length;
+    const s = u.s + i, e = s + c.length;
+    const hasTok = [...ud, ...ut].some((t) => t.s < e && t.e > s);
+    if (hasTok || WEEKDAY_WORD.test(c) || PLACE.test(` in ${c}`) || ONLINE.test(c) || /^https?:/.test(c) || !/\p{L}{2,}/u.test(c) || /^(?:sr|sl|s)\.?\s*no\.?$/i.test(c)) continue;
+    return { title: c, span: [s, e] };
+  }
   return null;
 }
 
@@ -174,7 +273,7 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
   // 2. Year for dates that do not say one, then the anchor date for "today" / "next day".
   let lastYear = null;
   for (const d of dates.filter((x) => x.kind === 'abs')) {
-    if (d.y) { lastYear = d.y; d.why = d.numeric ? `"${d.raw}" read as day/month/year (Indian format).` : `Date written in the notice: "${d.raw.trim()}".`; }
+    if (d.y) { lastYear = d.y; d.why = d.numeric ? `"${d.raw}" read as day/month/year (Indian format).` : d.isoForm ? `"${d.raw}" is a year-month-day date.` : `Date written in the notice: "${d.raw.trim()}".`; }
     else if (lastYear) { d.y = lastYear; d.why = `"${d.raw.trim()}" has no year; used ${lastYear} from earlier in the notice.`; }
     else {
       const [py] = pasted.split('-').map(Number);
@@ -185,17 +284,18 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
     d.date = iso(d.y, d.m, d.d);
   }
   const firstAbs = dates.find((x) => x.kind === 'abs');
-  const saysToday = /\b(today|tonight)\b/i.test(text);
+  const saysToday = /\b(today|tonight)\b|आज/i.test(text);
   // "tomorrow" in a notice with a "Date:" line counts from the notice's date, like "today" does.
-  const relWords = /\b(tomorrow|next day|day after tomorrow|kal|parso)\b/i.test(text);
-  const dateLine = /^[^\p{L}\p{N}\n]*\s*date\s*[:\-–]/imu.test(text);
-  const fromNotice = firstAbs && (saysToday || (dateLine && relWords));
+  const relWords = /\b(tomorrow|next day|day after tomorrow|kal|parso)\b|कल|परसों/i.test(text);
+  const dateLine = /^[^\p{L}\p{N}\n]*\s*(?:date|दिनांक|तिथि)\s*[:\-–]/imu.test(text);
+  const todayNear = firstAbs && /\b(?:today|tonight)['’s]*[^\n]{0,40}$|आज[^\n]{0,40}$/i.test(text.slice(Math.max(0, firstAbs.s - 60), firstAbs.s));
+  const fromNotice = firstAbs && ((saysToday && (dateLine || todayNear)) || (dateLine && relWords));
   result.anchorDate = fromNotice ? firstAbs.date : pasted;
   result.anchorFromNotice = Boolean(fromNotice);
   const anchorWhy = fromNotice ? `the notice's own date (${prettyDate(firstAbs.date)})` : `the day you pasted it (${prettyDate(pasted)})`;
   for (const d of dates.filter((x) => x.kind === 'rel')) {
     if (d.weekday !== undefined) {
-      const dow = new Date(`${result.anchorDate}T00:00:00Z`).getUTCDay();
+      const dow = weekdayOf(result.anchorDate);
       const ahead = (d.weekday - dow + 7) % 7 || (d.thisWeek ? 0 : 7);
       d.date = addDays(result.anchorDate, ahead);
       d.why = `"${d.raw}" = ${prettyDate(d.date)}, the next one after ${anchorWhy}.`;
@@ -207,11 +307,12 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
   }
 
   // 3. One candidate event per unit that has a date or time and something to call it.
-  const us = units(text);
+  const us = splitCompound(units(text), text, times);
   const inside = (toks, u) => toks.filter((t) => t.s >= u.s && t.e <= u.e);
   const candidates = [];
   const durationsByFam = [];
   let ctxDate = null;
+  let header = null; // the last event word seen on a short line with no date or time ("Exam schedule:"), for timetable rows
   let id = 0;
 
   for (const u of us) {
@@ -242,9 +343,14 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
     }
     // A time line with no event word ("Timings will be 9:30 AM to 12:30 PM daily") belongs to the event just above it.
     const prevEv = candidates[candidates.length - 1];
-    if (!k && !ud.length && ut.length && !u.block && prevEv && !prevEv.start && us.indexOf(prevEv.unit) === us.indexOf(u) - 1) {
-      setTime(prevEv, ut, u, text);
-      continue;
+    const gap = prevEv ? us.indexOf(u) - us.indexOf(prevEv.unit) : 99;
+    if (!k && !ud.length && ut.length && !u.block && prevEv && gap <= 2) {
+      if (/\breport(?:ing)?\b/i.test(u.text) && prevEv.start) {
+        prevEv.reportAt = ut[0].start;
+        prevEv.flags.push({ field: 'start', level: 'info', msg: `Report by ${fmt12(ut[0].start)}; it starts at ${fmt12(prevEv.start)}.` });
+        continue;
+      }
+      if (!prevEv.start && gap === 1) { setTime(prevEv, ut, u, text); continue; }
     }
 
     if (!ud.length && !ut.length) {
@@ -256,6 +362,7 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
       // "It takes 2 hours." right after an event belongs to that event.
       if (!k && udur.length && prevEv && !prevEv.durationMin && us.indexOf(prevEv.unit) === us.indexOf(u) - 1) { prevEv.durationMin = udur[0].minutes; continue; }
       if (k && udur.length) durationsByFam.push({ fam: k.fam, d: udur[0] });
+      if (k && !u.block && u.text.length <= 60) header = { k, unit: u };
       if (!u.block && NOTE.test(u.text.replace(/^[\s\-•*·]+/, ''))) result.notes.push(u.text.replace(/^[\s\-•*·]+/, '').replace(/^note\s*[:\-–]\s*/i, ''));
       const vague = VAGUE.exec(u.text);
       if (vague && k) addPending(result, u, k, vague[0]);
@@ -275,6 +382,15 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
         const before = [...us].reverse().find((v) => v.e <= u.s && keyword(v.text));
         if (before) { kw = keyword(before.text); titleInfo = titleFor(before.text, kw); titleInfo.span = spanOf(titleInfo, before.s, kw); }
       }
+    }
+    // Timetable rows: the subject cell names the event, the header line above the table gives its kind.
+    const row = tableRow(u, ud, ut);
+    if (row && (!kw || GENERIC.has(norm(kw.kw)) || header)) {
+      const hk = kw || (header && header.k);
+      const label = hk ? labelFor(hk) : null;
+      const title = label && !kw && !new RegExp(`\\b${label}\\b`, 'i').test(row.title) ? `${row.title} ${label.toLowerCase()}` : row.title;
+      titleInfo = { title: cap(title), why: header && !kw ? `Timetable row under "${header.unit.text.trim()}".` : 'Timetable row: the subject column names it.', span: row.span };
+      if (!kw && hk) { kw = hk; titleInfo.kwSpan = [header.unit.s + hk.i, header.unit.s + hk.i + hk.kw.length]; }
     }
     if (!kw && !ut.length) continue; // a bare date with nothing happening on it
     if (!titleInfo && kw) { titleInfo = titleFor(u.text, kw); titleInfo.span = spanOf(titleInfo, u.s, kw); }
@@ -300,11 +416,25 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
       if (d.yearGuessed && firstDate) ev.flags.push({ field: 'date', level: 'info', msg: `Year not written; assumed ${d.y}.` });
       if (d.weekdayGuess && firstDate) ev.flags.push({ field: 'date', level: 'warn', msg: `"${d.raw}" read as ${prettyDate(d.date)}. Check it is the right week.` });
       if (firstDate) dateSpread(ev, ud, text);
+      // "Thursday, 13 Nov 2026" when 13 Nov 2026 is a Friday: the notice contradicts itself.
+      const named = firstDate && firstDate.kind === 'abs' && ud.find((x) => x.kind === 'rel' && x.weekday !== undefined);
+      if (named && named.weekday !== weekdayOf(d.date)) {
+        ev.flags.push({ field: 'date', level: 'warn', msg: `The notice says "${named.raw}" but ${prettyDate(d.date)} is a ${WEEKDAY_NAMES[weekdayOf(d.date)]}. Check which one is right.` });
+      }
+      if (firstDate) dayChecks(ev, d.date);
     } else {
       ev.flags.push({ field: 'date', level: 'warn', msg: 'No date found in this part of the notice. Pick the date.' });
     }
 
-    setTime(ev, ut, u, text);
+    // "Reporting time: 8:30 AM" beside "Time: 10:00 AM": the event starts at 10, reporting is a note.
+    let utMain = ut;
+    if (u.block) {
+      const rl = u.lines.find((l) => /^[^\p{L}]*reporting\s*time/iu.test(l.t));
+      const rep = rl && ut.find((t) => t.s >= rl.s && t.e <= rl.e);
+      if (rep && ut.some((t) => t !== rep)) { utMain = ut.filter((t) => t !== rep); ev.reportAt = rep.start; }
+    }
+    setTime(ev, utMain, u, text);
+    if (ev.reportAt) ev.flags.push({ field: 'start', level: 'info', msg: `Report by ${fmt12(ev.reportAt)}; it starts at ${fmt12(ev.start)}.` });
     if (udur.length) ev.durationMin = udur[0].minutes;
     const v = venueFor(u);
     if (v) { ev.venue = v.venue; ev.sources.venue = v.span; ev.why.venue = v.why; if (v.zoom) ev.zoom = true; }
@@ -313,7 +443,6 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
 
   // 4. Merge mentions of the same thing, catch contradictions, attach links and durations.
   const events = [];
-  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   for (const ev of candidates) {
     // A later "rescheduled to 12 Nov" replaces the earlier event of the same name instead of adding a second one.
     const earlier = ev.revisedBy && events.find((x) => norm(x.title) === norm(ev.title));
@@ -327,9 +456,10 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
       earlier.flags.push({ field: 'date', level: 'info', msg: `Revised by "${ev.revisedBy}". It was ${was}.` });
       continue;
     }
-    const same = events.find((x) => x.family === ev.family && x.date && ev.date && compatible(x, ev));
+    // Two mentions of the same test merge; "Maths test" and "Physics test" at the same hour are two events, and a clash.
+    const same = events.find((x) => x.family === ev.family && x.date && ev.date && sameThing(x.title, ev.title) && compatible(x, ev));
     if (same) { mergeInto(same, ev); continue; }
-    const clash = events.find((x) => x.family === ev.family && x.date && ev.date && x.date !== ev.date && norm(x.title) === norm(ev.title) && x.family !== 'test');
+    const clash = events.find((x) => x.family === ev.family && x.date && ev.date && x.date !== ev.date && norm(x.title) === norm(ev.title) && x.family !== 'test' && !GENERIC.has(norm(x.title)));
     if (clash) {
       result.warnings.push({ level: 'warn', span: [ev.unit.s, ev.unit.e],
         msg: `The notice gives two different dates for "${clash.title}": ${prettyDate(clash.date)} ("${clash.unit.text.slice(0, 60).trim()}") and ${prettyDate(ev.date)} ("${ev.unit.text.slice(0, 60).trim()}"). Both are shown; keep the right one and delete the other.` });
@@ -380,6 +510,13 @@ export function parseNotice(text, { pastedAt = new Date() } = {}) {
   return result;
 }
 
+// Sunday and gazetted holidays: colleges do hold placement drives on them, so the app asks, it never moves anything.
+function dayChecks(ev, date) {
+  const holiday = holidayOn(date);
+  if (holiday) ev.flags.push({ field: 'date', level: 'warn', msg: `${prettyDate(date)} is ${holiday}, a gazetted holiday. Confirm the college is open that day.` });
+  else if (weekdayOf(date) === 0) ev.flags.push({ field: 'date', level: 'info', msg: `${prettyDate(date)} is a Sunday.` });
+}
+
 function setTime(ev, ut, u, text) {
   const t = ut.find((x) => x.end) || ut[0];
   if (!t) return;
@@ -398,8 +535,17 @@ function setTime(ev, ut, u, text) {
     if (ev.family === 'deadline') ev.type = 'deadline';
   } else {
     ev.why.start = `Time written: "${t.raw.trim()}"${noon}.`;
+    // "starts at 10 AM and ends by 1 PM", "10 AM till 1 PM" across words: the second time is the end.
+    const second = ut.find((x) => x !== t && !x.end && x.s > t.e);
+    if (second && END_CUE.test(text.slice(t.e, second.s)) && toMin(second.start) > toMin(t.start)) {
+      ev.end = second.start;
+      ev.sources.end = second.spanStart;
+      ev.why.end = `"${text.slice(t.e, second.e).trim()}" gives the end.`;
+    }
   }
-  if (t.guessed) ev.flags.push({ field: 'start', level: 'warn', msg: t.session ? `${t.raw} session times differ by college; check ${fmt12(t.start)} - ${fmt12(t.end)}.` : `No AM/PM written; assumed ${fmt12(t.start)}.` });
+  if (t.military) ev.why.start = `"${t.raw.trim()}" is 24-hour time = ${fmt12(t.start)}.`;
+  if (t.eod) ev.flags.push({ field: 'start', level: 'warn', msg: `"${t.raw}" read as ${fmt12(t.start)} (end of the working day). If your college means midnight, change it.` });
+  else if (t.guessed) ev.flags.push({ field: 'start', level: 'warn', msg: t.session ? `${t.raw} session times differ by college; check ${fmt12(t.start)} - ${fmt12(t.end)}.` : `No AM/PM written; assumed ${fmt12(t.start)}.` });
   if (t.hinglish) ev.why.start = `Hinglish time "${t.raw}" = ${fmt12(t.start)}.`;
 }
 
@@ -408,8 +554,15 @@ function setTime(ev, ut, u, text) {
 function dateSpread(ev, ud, text) {
   const abs = ud.filter((x) => x.kind === 'abs');
   if (abs.length < 2) return;
-  const joined = abs.every((x, i) => i === 0 || RANGE_JOIN.test(text.slice(abs[i - 1].e, x.s)));
+  const joins = abs.slice(1).map((x, i) => text.slice(abs[i].e, x.s));
+  const joined = joins.every((j) => RANGE_JOIN.test(j));
   const days = daysBetween(abs[0].date, abs[abs.length - 1].date) + 1;
+  // "16 and 17 Oct" is a run of days; "5th and 7th Nov" (a gap, joined by "and") is two separate days.
+  const listed = joins.some((j) => /^\s*(?:,|and|&|aur|और|व)\s*$/i.test(j)) && days !== abs.length;
+  if (listed) {
+    ev.flags.push({ field: 'date', level: 'warn', msg: `This part names separate days (${abs.map((x) => prettyDate(x.date)).join(', ')}). This card is the first; add the other day with "+ Add event" if it is a separate event.` });
+    return;
+  }
   if (joined && days >= 2 && days <= 14) {
     ev.repeat = days; // ponytail: clashes are checked on the first day only; check each day if multi-day clashes matter
     ev.flags.push({ field: 'date', level: 'info', msg: `Runs every day from ${prettyDate(abs[0].date)} to ${prettyDate(abs[abs.length - 1].date)} (${days} days). The calendar file repeats it.` });
@@ -445,6 +598,7 @@ function mergeInto(keep, other) {
   if (!keep.venue && other.venue) { keep.venue = other.venue; keep.sources.venue = other.sources.venue; keep.why.venue = other.why.venue; keep.zoom = other.zoom; }
   keep.durationMin = keep.durationMin || other.durationMin;
   keep.repeat = keep.repeat || other.repeat;
+  keep.reportAt = keep.reportAt || other.reportAt;
 }
 
 // A link line naming an event kind ("Aptitude Test Link") goes to that event; otherwise to the nearest event above it.

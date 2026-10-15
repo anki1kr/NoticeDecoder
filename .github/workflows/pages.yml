@@ -15,3 +15,8 @@ jobs:
         with:
           node-version: 22
       - run: node tests/engine.test.mjs
+      - run: node worker/test/feed.test.mjs
+      - run: node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs
+      - run: node companion/scripts/sync-engine.mjs && node companion/test/pipeline.test.mjs
+      - name: bundle and companion engine copy are up to date
+        run: git diff --exit-code -- dist/notice-engine.js companion/engine/notice-engine.js || (echo 'run: node companion/scripts/sync-engine.mjs and commit' && exit 1)

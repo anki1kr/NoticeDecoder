@@ -1,13 +1,20 @@
 // Notice Decoder UI. Vanilla ES module, no build step.
-// Engine contract: ./engine/parse.js, ./engine/clash.js, ./engine/ics.js (see CLAUDE.md).
+// Engine contract: ./engine/parse.js, ./engine/clash.js, ./engine/ics.js (see AGENTS.md).
 import { parseNotice } from './engine/parse.js';
 import { findClashes } from './engine/clash.js';
 import { toICS, gcalUrl } from './engine/ics.js';
 import { SAMPLES } from './samples.js';
+import * as gcal from './gcal.js';
+import { FEED_BASE } from './config.js';
+
+const AUTO_ADD_KEY = 'nd-auto-add';
+const CLASS_KEY = 'nd-class'; // { id, secret, name, feed, page } for the class representative
+const feedBase = () => (FEED_BASE || window.__ndFeedBase || '').replace(/\/+$/, '');
+const DECODE_DEBOUNCE_MS = 900;
 
 const TYPE_LABELS = { test: 'Test', deadline: 'Deadline', lecture: 'Lecture', other: 'Other' };
 const PALETTE_SIZE = 6; // matches .c0 to .c5 in styles.css
-const NULLABLE = new Set(['date', 'start', 'end', 'venue']);
+const NULLABLE = new Set(['date', 'start', 'end', 'venue', 'link', 'durationMin']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{1,2}:\d{2}$/;
 const WARN_STYLE = {
@@ -21,7 +28,9 @@ const FIELDS = [
   { key: 'date', label: 'Date', type: 'date' },
   { key: 'start', label: 'Start', type: 'time' },
   { key: 'end', label: 'End', type: 'time' },
+  { key: 'durationMin', label: 'Takes (minutes)', type: 'number' },
   { key: 'venue', label: 'Venue', type: 'text', wide: true },
+  { key: 'link', label: 'Link', type: 'url', wide: true },
 ];
 const EMPTY_INPUT_MSG = 'Paste a notice first. Copy the text from WhatsApp, a PDF or the notice board, then press Decode.';
 const PARSE_ERROR_MSG = 'The decoder could not read this notice. Try again with less text, or add the events by hand.';
@@ -33,11 +42,15 @@ const els = {
   inputError: $('#input-error'),
   decode: $('#decode-btn'),
   clear: $('#clear-btn'),
+  paste: $('#paste-btn'),
   samples: $('#sample-list'),
   results: $('#results'),
   warnings: $('#warnings'),
+  noticeCard: $('#notice-card'),
   noticeDate: $('#notice-date'),
   noticeText: $('#notice-text'),
+  sharedBanner: $('#shared-banner'),
+  sharedText: $('#shared-text'),
   eventList: $('#event-list'),
   eventsEmpty: $('#events-empty'),
   eventsHint: $('#events-hint'),
@@ -53,7 +66,24 @@ const els = {
   notesList: $('#notes-list'),
   reminders: $('#reminders'),
   exportBtn: $('#export-btn'),
+  gcalAll: $('#gcal-all-btn'),
+  gcalNote: $('#gcal-note'),
+  autoAdd: $('#auto-add'),
+  copyBtn: $('#copy-btn'),
+  shareBtn: $('#share-btn'),
+  waBtn: $('#wa-btn'),
   exportStatus: $('#export-status'),
+  classSection: $('#class-section'),
+  classStatus: $('#class-status'),
+  classPublish: $('#class-publish-btn'),
+  classLink: $('#class-link-btn'),
+  classJoin: $('#class-join'),
+  classJoinBtn: $('#class-join-btn'),
+  classOpenRow: $('#class-open-row'),
+  classOpenResult: $('#class-open-result'),
+  classResult: $('#class-result'),
+  install: $('#install-btn'),
+  offline: $('#offline-note'),
 };
 
 const state = {
@@ -62,6 +92,10 @@ const state = {
   events: [],       // working copies; user edits are applied here, never re-parsed
   manualCount: 0,
   exportNote: null, // { kind: 'ok' | 'error', text }
+  shared: null,     // { from, on } when the page was opened from a class link
+  lastRemoved: null, // { ev, index } for Undo
+  gcalLast: null,   // { added: [...] } from the last "Add all", for Undo
+  busy: false,      // an "Add all" is in flight
 };
 const cards = new Map();       // event id -> card element
 let marksByKey = new Map();    // "eventId:field" -> [mark elements] in the notice
@@ -85,6 +119,7 @@ function el(tag, props = {}, ...children) {
 
 const safeDate = (v) => (typeof v === 'string' && DATE_RE.test(v) ? v : null);
 const safeTime = (v) => (typeof v === 'string' && TIME_RE.test(v) ? v.padStart(5, '0') : null);
+const safeUrl = (v) => (typeof v === 'string' && /^https?:\/\/\S+$/i.test(v.trim()) ? v.trim() : null);
 const titleOf = (ev) => (ev.title || '').trim() || 'Untitled event';
 const keyOf = (eventId, field) => `${eventId}:${field}`;
 
@@ -100,6 +135,13 @@ function fmtDate(iso) {
   return new Intl.DateTimeFormat('en-GB', {
     weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
   }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+function fmt12(hhmm) {
+  const min = toMinutes(hhmm);
+  if (min === null) return hhmm || '';
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
 function hourLabel(min) {
@@ -118,11 +160,12 @@ function workingCopy(raw, index) {
     start: safeTime(raw.start),
     end: safeTime(raw.end),
     venue: raw.venue || null,
-    durationMin: Number.isFinite(raw.durationMin) ? raw.durationMin : null,
-    link: raw.link || null,
+    durationMin: Number.isFinite(raw.durationMin) && raw.durationMin > 0 ? raw.durationMin : null,
+    link: safeUrl(raw.link),
     repeat: Number.isFinite(raw.repeat) ? raw.repeat : null,
     point: Boolean(raw.point),
     window: Boolean(raw.window),
+    reportAt: safeTime(raw.reportAt),
     sources: { ...(raw.sources || {}) },
     why: { ...(raw.why || {}) },
     flags: Array.isArray(raw.flags) ? [...raw.flags] : [],
@@ -144,7 +187,9 @@ function clearInputError() {
   els.input.removeAttribute('aria-invalid');
 }
 
-function decode(text) {
+// `auto` = the notice arrived on its own (share sheet, clipboard): when nothing needs a check and auto-add is on,
+// the events go straight to Google Calendar, with Undo. A pasted or typed notice never auto-adds.
+function decode(text, { auto = false } = {}) {
   if (!text.trim()) {
     showInputError(EMPTY_INPUT_MSG);
     return;
@@ -162,11 +207,15 @@ function decode(text) {
   state.result = result;
   state.events = (result.events || []).map((raw, i) => workingCopy(raw, i));
   state.exportNote = null;
+  state.shared = null;
+  state.lastRemoved = null;
+  state.gcalLast = null;
   els.results.hidden = false;
   renderAll();
   els.noticeText.classList.add('draw'); // highlighter strokes draw in once per decode, not on every edit
   setTimeout(() => els.noticeText.classList.remove('draw'), 3000);
   els.results.focus();
+  if (auto) maybeAutoAdd();
 }
 
 function clearAll() {
@@ -176,8 +225,11 @@ function clearAll() {
   state.result = null;
   state.events = [];
   state.exportNote = null;
+  state.shared = null;
+  state.lastRemoved = null;
   cards.clear();
   els.results.hidden = true;
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   els.input.focus();
 }
 
@@ -186,6 +238,11 @@ function clearAll() {
 function renderAll() {
   const anchor = state.result?.anchorDate;
   els.noticeDate.textContent = state.result?.anchorFromNotice && safeDate(anchor) ? `Notice dated ${fmtDate(anchor)}.` : '';
+  els.noticeCard.hidden = !state.decodedText;
+  els.sharedBanner.hidden = !state.shared;
+  if (state.shared) {
+    els.sharedText.textContent = `Shared by ${state.shared.from || 'your class representative'}${state.shared.on ? ` on ${fmtDate(state.shared.on)}` : ''}. Check the events, then add them to your calendar.`;
+  }
   renderWarnings();
   renderNotice();
   renderEvents();
@@ -278,21 +335,56 @@ function pulseSource(eventId, field) {
 
 // ---------- render: event cards ----------
 
+// Only flagged fields need the student's eyes; say how many, so the rest can be trusted at a glance.
+const toCheck = (ev) => (ev.flags || []).filter((f) => f.level === 'warn');
+// A card (the full form) only for what needs eyes: amber fields, a manual event, or one the student opened.
+const needsCard = (ev) => Boolean(ev.manual || ev.expanded || toCheck(ev).length);
+
+// Amber first, then the clean ones as one-line rows. Order inside each group is the notice order.
 function renderEvents() {
   cards.clear();
-  els.eventList.replaceChildren(...state.events.map(buildCard));
+  const amber = state.events.filter(needsCard), clean = state.events.filter((ev) => !needsCard(ev));
+  els.eventList.replaceChildren(...amber.map(buildCard), ...clean.map(buildRow));
   els.eventsEmpty.hidden = state.events.length > 0;
   renderEventsHint();
 }
 
-// Only flagged fields need the student's eyes; say how many, so the rest can be trusted at a glance.
-const toCheck = (ev) => (ev.flags || []).filter((f) => f.level === 'warn');
+function whenText(ev) {
+  if (!ev.start) return 'All day';
+  if (ev.type === 'deadline' || ev.point) return `by ${fmt12(ev.start)}`;
+  return ev.end ? `${fmt12(ev.start)} - ${fmt12(ev.end)}` : fmt12(ev.start);
+}
+
+function shortDate(iso) {
+  if (!safeDate(iso)) return 'No date';
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+// One line per clean event. "Edit" opens the full card.
+function buildRow(ev) {
+  const open = () => { ev.expanded = true; renderEvents(); cards.get(ev.id)?.querySelector('input')?.focus(); };
+  const row = el('div', { class: `row ev c${ev.color}`, dataset: { id: ev.id } },
+    el('span', { class: `dot c${ev.color}` }),
+    el('span', { class: 'row-when' }, `${shortDate(ev.date)} · ${whenText(ev)}`),
+    el('span', { class: 'row-title' }, titleOf(ev), ev.venue ? el('span', { class: 'row-venue' }, ` · ${ev.venue}`) : null),
+    el('span', { class: 'badge' }, ev.typeLabel),
+    el('span', { class: 'row-actions' },
+      el('button', { type: 'button', class: 'link', 'aria-label': `Edit ${titleOf(ev)}`, onclick: open }, 'Edit'),
+      el('button', { type: 'button', class: 'link', 'aria-label': `Delete ${titleOf(ev)}`, onclick: () => removeEvent(ev) }, 'Delete')));
+  cards.set(ev.id, row);
+  return row;
+}
 
 function renderEventsHint() {
   const n = state.events.reduce((sum, ev) => sum + toCheck(ev).length, 0);
-  els.eventsHint.textContent = !state.events.length ? ''
+  const text = !state.events.length ? ''
     : n === 0 ? 'Nothing to check. Every field was read from the notice; edit any of them and the clash check updates.'
       : `${n} field${n > 1 ? 's need' : ' needs'} a check (outlined in amber). The rest came straight from the notice.`;
+  const undo = state.lastRemoved ? el('span', { class: 'undo' },
+    ` Deleted "${titleOf(state.lastRemoved.ev)}". `,
+    el('button', { type: 'button', class: 'link', onclick: undoRemove }, 'Undo')) : null;
+  els.eventsHint.replaceChildren(...[text, undo].filter(Boolean));
 }
 
 // Status line, amber outlines and the Google Calendar link, refreshed after every edit.
@@ -309,10 +401,13 @@ function renderCheck(ev, card) {
   }
   card.querySelector('.flags').replaceChildren(...(ev.flags || []).filter((f) => f.level !== 'warn').map((f) =>
     el('p', { class: 'chip chip-info' }, String(f.msg || ''))));
-  const url = warn.length ? null : gcalUrl(ev); // no export before the student has checked it
+  const url = warn.length || !titleOf(ev) ? null : gcalUrl(ev); // no export before the student has checked it
   const gcal = card.querySelector('.gcal');
   gcal.hidden = !url;
   if (url) gcal.href = url;
+  const open = card.querySelector('.open-link');
+  open.hidden = !ev.link;
+  if (ev.link) open.href = ev.link;
 }
 
 function buildCard(ev) {
@@ -322,6 +417,7 @@ function buildCard(ev) {
     el('div', { class: 'card-head' },
       el('span', { class: 'badge' }, ev.typeLabel),
       el('span', { class: 'head-actions' },
+        el('a', { class: 'btn small open-link', target: '_blank', rel: 'noopener', 'aria-label': `Open the link for ${titleOf(ev)}` }, 'Open link'),
         el('a', { class: 'btn small gcal', target: '_blank', rel: 'noopener', 'aria-label': `Add ${titleOf(ev)} to Google Calendar` }, 'Add to Google Calendar'),
         el('button', {
           type: 'button',
@@ -341,7 +437,7 @@ function buildField(ev, card, spec) {
   const control = spec.type === 'select'
     ? el('select', {}, ...Object.entries(TYPE_LABELS).map(([value, label]) =>
       el('option', { value, selected: value === ev.type }, label)))
-    : el('input', { type: spec.type, value: ev[spec.key] ?? '' });
+    : el('input', { type: spec.type, value: ev[spec.key] ?? '', min: spec.type === 'number' ? '5' : null, step: spec.type === 'number' ? '5' : null, inputmode: spec.type === 'number' ? 'numeric' : null, placeholder: spec.key === 'link' ? 'https://' : null });
   control.addEventListener('input', () => onEdit(ev, card, spec.key, control.value));
   return el('div', { class: spec.wide ? 'field wide' : 'field', dataset: { field: spec.key } },
     el('label', {}, el('span', { class: 'lbl' }, spec.label), control),
@@ -351,7 +447,7 @@ function buildField(ev, card, spec) {
 // The "why" line under a field, with a jump to the highlighted source when one exists.
 function buildWhy(ev, field) {
   const reason = ev.why?.[field];
-  const hasSource = Array.isArray(ev.sources?.[field]);
+  const hasSource = Array.isArray(ev.sources?.[field]) && state.decodedText;
   return el('div', { class: 'why', dataset: { why: field } },
     reason ? `why: ${reason}` : null,
     hasSource ? el('button', {
@@ -370,14 +466,29 @@ function confirmEvent(ev, card) {
 }
 
 function onEdit(ev, card, field, raw) {
-  ev[field] = raw === '' && NULLABLE.has(field) ? null : raw;
+  let value = raw;
+  if (field === 'durationMin') value = raw === '' ? null : Math.max(0, Math.round(Number(raw))) || null;
+  else if (field === 'link') value = raw.trim() === '' ? null : raw.trim();
+  else if (raw === '' && NULLABLE.has(field)) value = null;
+  ev[field] = value;
   if (field === 'type') {
     ev.typeLabel = TYPE_LABELS[raw] || ev.typeLabel;
     card.querySelector('.badge').textContent = ev.typeLabel;
   }
+  if (field === 'durationMin' && value && ev.start && !ev.end && ev.type !== 'deadline') {
+    // Keep the three in step: a duration typed in gives the end the clash check and the file will use.
+    const endMin = Math.min(toMinutes(ev.start) + value, 1439);
+    ev.end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+    card.querySelector('[data-field="end"] input').value = ev.end;
+    ev.why = { ...ev.why, end: `${value} minutes after the start.` };
+    card.querySelector('[data-why="end"]').replaceWith(buildWhy(ev, 'end'));
+  }
   if (ev.sources) delete ev.sources[field]; // the notice no longer backs this field
   ev.why = { ...ev.why, [field]: 'edited by you' };
   ev.flags = (ev.flags || []).filter((f) => f.field !== field); // the student has now checked it
+  if (field === 'end' && ev.end && ev.start && toMinutes(ev.end) <= toMinutes(ev.start)) {
+    ev.flags.push({ field: 'end', level: 'warn', msg: 'End time is before the start. Please fix it.' });
+  }
   card.querySelector(`[data-why="${field}"]`).replaceWith(buildWhy(ev, field));
   renderCheck(ev, card);
   renderEventsHint();
@@ -388,10 +499,22 @@ function onEdit(ev, card, field, raw) {
 }
 
 function removeEvent(ev) {
+  const index = state.events.indexOf(ev);
   state.events = state.events.filter((item) => item !== ev);
+  state.lastRemoved = { ev, index };
   cards.get(ev.id)?.remove();
   cards.delete(ev.id);
   afterListChange();
+}
+
+function undoRemove() {
+  const { ev, index } = state.lastRemoved || {};
+  if (!ev) return;
+  state.lastRemoved = null;
+  state.events.splice(Math.min(index, state.events.length), 0, ev);
+  renderEvents();
+  afterListChange();
+  cards.get(ev.id)?.focus();
 }
 
 function addManual() {
@@ -550,17 +673,98 @@ function renderSummary() {
     checks ? '' : '.');
 }
 
+// The one rule of the review gate: nothing leaves the page while a field is unchecked, undated or unnamed.
+function exportBlock() {
+  const undated = state.events.filter((ev) => !ev.date);
+  const unnamed = state.events.filter((ev) => !(ev.title || '').trim());
+  if (!state.events.length) return 'Add an event before you download.';
+  if (undated.length) return `Add a date to: ${undated.map(titleOf).join(', ')}.`;
+  if (unnamed.length) return `Give a title to ${unnamed.length === 1 ? 'the untitled event' : `${unnamed.length} untitled events`}.`;
+  const amber = state.events.filter((ev) => toCheck(ev).length);
+  if (amber.length) return `Check the amber fields first: ${amber.map(titleOf).join(', ')}.`;
+  return null;
+}
+
 function renderExport() {
   renderSummary();
-  const undated = state.events.filter((ev) => !ev.date);
-  let blocked = null;
-  if (!state.events.length) blocked = 'Add an event before you download.';
-  else if (undated.length) blocked = `Add a date to: ${undated.map(titleOf).join(', ')}.`;
-  else if (state.events.some((ev) => toCheck(ev).length)) blocked = `Check the amber fields first: ${state.events.filter((ev) => toCheck(ev).length).map(titleOf).join(', ')}.`;
-  els.exportBtn.disabled = Boolean(blocked);
+  const blocked = exportBlock();
+  for (const b of [els.exportBtn, els.copyBtn, els.shareBtn, els.waBtn, els.classPublish]) b.disabled = Boolean(blocked);
+  const n = state.events.length;
+  if (inCompanion()) {
+    els.gcalAll.disabled = Boolean(blocked) || state.busy;
+    els.gcalAll.textContent = `Add all to your phone calendar${n > 1 ? ` (${n})` : ''}`;
+    els.gcalNote.textContent = 'Goes into the calendar the Notice Decoder app writes to. Adding twice updates, never duplicates.';
+  } else {
+    els.gcalAll.disabled = Boolean(blocked) || !gcal.configured() || state.busy;
+    els.gcalAll.textContent = state.busy ? 'Adding...' : `Add all to Google Calendar${n > 1 ? ` (${n})` : ''}`;
+    els.gcalNote.textContent = !gcal.configured()
+      ? 'One-tap add is not set up on this copy of the app (GOOGLE_CLIENT_ID in app/config.js). Use the calendar file below.'
+      : gcal.signedIn() ? 'Signed in to Google. Adding twice updates the same events; it never duplicates them.'
+        : 'Signs you in to Google once, then writes the events straight into your calendar.';
+  }
   const shown = blocked ? { kind: 'error', text: blocked } : state.exportNote;
-  els.exportStatus.textContent = shown?.text || '';
+  els.exportStatus.replaceChildren(shown?.text || '', shown?.undo ? el('button', { type: 'button', class: 'link', onclick: shown.undo }, ' Undo') : '');
   els.exportStatus.dataset.kind = shown?.kind || '';
+}
+
+// ---------- Google Calendar, one tap ----------
+
+// Inside the Android companion's WebView the same button hands the events to the phone calendar instead.
+const inCompanion = () => Boolean(window.ReactNativeWebView);
+
+async function addAllToGoogle({ silent = false } = {}) {
+  if (state.busy || exportBlock()) return;
+  if (inCompanion()) {
+    const events = state.events.map(({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }) =>
+      ({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }));
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'nd-add', events }));
+    state.exportNote = { kind: 'ok', text: 'Handed to your phone calendar.' };
+    renderExport();
+    return;
+  }
+  state.busy = true;
+  renderExport();
+  try {
+    const result = await gcal.addAll(state.events, { reminders: els.reminders.checked, silent }, window.__ndGcalDeps || {});
+    if (!result) { state.exportNote = silent ? { kind: '', text: 'Signed out of Google: tap "Add all" once to sign in; after that shared notices add themselves.' } : null; return; }
+    state.gcalLast = result;
+    const parts = [];
+    if (result.added.length) parts.push(`added ${result.added.length}`);
+    if (result.updated.length) parts.push(`updated ${result.updated.length}`);
+    if (result.failed.length) parts.push(`${result.failed.length} failed (${result.failed.map((f) => f.error).join('; ')})`);
+    state.exportNote = {
+      kind: result.failed.length ? 'error' : 'ok',
+      text: `Google Calendar: ${parts.join(', ')}.${silent ? ' (added automatically)' : ''}`,
+      undo: result.added.length ? undoGoogle : null,
+    };
+  } catch (err) {
+    state.exportNote = { kind: 'error', text: String(err.message || err) };
+  } finally {
+    state.busy = false;
+    renderExport();
+  }
+}
+
+async function undoGoogle() {
+  const last = state.gcalLast;
+  if (!last?.added?.length) return;
+  state.gcalLast = null;
+  try {
+    const n = await gcal.removeAll(last.added, window.__ndGcalDeps || {});
+    state.exportNote = { kind: 'ok', text: `Removed ${n} event${n === 1 ? '' : 's'} from Google Calendar.` };
+  } catch (err) {
+    state.exportNote = { kind: 'error', text: String(err.message || err) };
+  }
+  renderExport();
+}
+
+const autoAddOn = () => { try { return localStorage.getItem(AUTO_ADD_KEY) === '1'; } catch { return false; } };
+
+// The zero-touch path: a notice that arrived by itself, nothing amber, auto-add switched on, Google still signed in.
+function maybeAutoAdd() {
+  if (!autoAddOn() || !gcal.configured() || exportBlock()) return;
+  if (!gcal.signedIn()) { state.exportNote = { kind: '', text: 'Nothing to check. Tap "Add all" once to sign in to Google; after that shared notices add themselves.' }; renderExport(); return; }
+  addAllToGoogle({ silent: true });
 }
 
 function downloadIcs() {
@@ -587,6 +791,245 @@ function downloadIcs() {
   renderExport();
 }
 
+// A plain-text digest for the class group: one line per event, clashes at the end.
+function summaryText() {
+  const lines = [];
+  for (const [iso, evs] of groupByDate(state.events)) {
+    lines.push(`📅 ${fmtDate(iso)}`);
+    for (const ev of [...evs].sort((a, b) => (a.start || '').localeCompare(b.start || ''))) {
+      const when = !ev.start ? 'All day' : ev.type === 'deadline' || ev.point ? `by ${fmt12(ev.start)}` : ev.end ? `${fmt12(ev.start)} - ${fmt12(ev.end)}` : fmt12(ev.start);
+      lines.push(`• ${when}: ${titleOf(ev)} (${ev.typeLabel})${ev.venue ? `, ${ev.venue}` : ''}${ev.link ? `\n  ${ev.link}` : ''}`);
+    }
+  }
+  const clashes = currentClashes().filter((c) => c.kind !== 'none');
+  if (clashes.length) {
+    const byId = new Map(state.events.map((ev) => [ev.id, ev]));
+    lines.push('', `⚠️ ${clashes.length} clash${clashes.length > 1 ? 'es' : ''}:`);
+    for (const c of clashes) lines.push(`• ${titleOf(byId.get(c.a))} x ${titleOf(byId.get(c.b))}: ${String(c.msg).replace(/^clash\.\s*/i, '')}${c.action ? ` ${c.action}` : ''}`);
+  }
+  lines.push('', 'Decoded with Notice Decoder. Check the original notice for changes.');
+  return lines.join('\n');
+}
+
+async function copySummary() {
+  const text = summaryText();
+  try {
+    await navigator.clipboard.writeText(text);
+    state.exportNote = { kind: 'ok', text: 'Copied. Paste it in the class group.' };
+  } catch {
+    state.exportNote = { kind: 'error', text: 'Could not copy. Long-press the text below to copy it.' };
+    els.exportStatus.after(el('textarea', { class: 'fallback-copy', readonly: true, rows: 6 }, text));
+  }
+  renderExport();
+}
+
+// ---------- share with class: the events travel inside the link, no server ----------
+
+const SHARE_VERSION = 1;
+const b64url = (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
+
+function shareUrl() {
+  const payload = {
+    v: SHARE_VERSION,
+    on: new Date().toISOString().slice(0, 10),
+    e: state.events.map((ev) => ({
+      t: ev.title, k: ev.type, d: ev.date, s: ev.start, e: ev.end, v: ev.venue, l: ev.link,
+      m: ev.durationMin, r: ev.repeat, p: ev.point ? 1 : 0, w: ev.window ? 1 : 0,
+    })),
+  };
+  const url = new URL(location.href);
+  url.search = '';
+  url.hash = `s=${b64url(JSON.stringify(payload))}`;
+  return url.toString();
+}
+
+function loadShared(hash) {
+  const m = /(?:^|[#&])s=([A-Za-z0-9_-]+)/.exec(hash);
+  if (!m) return false;
+  let payload;
+  try { payload = JSON.parse(unb64url(m[1])); } catch { return false; }
+  if (!payload || payload.v !== SHARE_VERSION || !Array.isArray(payload.e)) return false;
+  const events = payload.e.slice(0, 50).map((x, i) => workingCopy({
+    id: `s${i + 1}`, title: String(x.t || '').slice(0, 120), type: x.k, typeLabel: TYPE_LABELS[x.k] || 'Other',
+    date: x.d, start: x.s, end: x.e, venue: x.v ? String(x.v).slice(0, 120) : null, link: x.l,
+    durationMin: Number(x.m) || null, repeat: Number(x.r) || null, point: Boolean(x.p), window: Boolean(x.w),
+    why: { title: 'from the shared link' }, flags: [],
+  }, i));
+  if (!events.length) return false;
+  state.decodedText = '';
+  state.result = { warnings: [], pending: [], notes: [] };
+  state.events = events;
+  state.exportNote = null;
+  state.shared = { from: null, on: safeDate(payload.on) };
+  state.lastRemoved = null;
+  els.results.hidden = false;
+  renderAll();
+  els.results.focus();
+  return true;
+}
+
+async function shareWithClass() {
+  const url = shareUrl();
+  // The link is copied first, so it is on the clipboard whatever the share sheet does.
+  let copied = false;
+  try { await navigator.clipboard.writeText(url); copied = true; } catch { /* no clipboard access */ }
+  state.exportNote = copied
+    ? { kind: 'ok', text: 'Link copied. Anyone who opens it sees these events and can add them in one tap.' }
+    : { kind: 'error', text: `Could not copy. The link is: ${url}` };
+  renderExport();
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Class events', text: `${summaryText()}\n\nOpen in Notice Decoder (one tap to add to your calendar): ${url}` });
+      state.exportNote = { kind: 'ok', text: 'Shared, and the link is on your clipboard.' };
+      renderExport();
+    } catch { /* the share sheet was closed or is not allowed here; the clipboard copy stands */ }
+  }
+}
+
+function openWhatsApp() {
+  const text = `${summaryText()}\n\nOpen in Notice Decoder: ${shareUrl()}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+}
+
+// ---------- class feed: the CR publishes once, the class subscribes once (worker/) ----------
+
+const myClass = () => { try { return JSON.parse(localStorage.getItem(CLASS_KEY) || 'null'); } catch { return null; } };
+const saveClass = (c) => { try { localStorage.setItem(CLASS_KEY, JSON.stringify(c)); } catch { /* ignore */ } };
+
+async function feedCall(method, path, { body, token } = {}) {
+  const res = await fetch(`${feedBase()}${path}`, {
+    method,
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `The class feed said ${res.status}`);
+  return data;
+}
+
+function renderClass() {
+  els.classSection.hidden = !feedBase();
+  els.classOpenRow.hidden = !feedBase();
+  if (!feedBase()) return;
+  const c = myClass();
+  els.classStatus.replaceChildren(c
+    ? el('span', {}, `Your class: ${c.name}. Subscribe page: `, el('a', { href: c.page, target: '_blank', rel: 'noopener' }, c.page))
+    : 'No class yet. The first publish creates one and gives you its subscribe link.');
+  els.classLink.hidden = !c;
+  els.classPublish.textContent = c ? `Publish to ${c.name}` : 'Publish to class';
+}
+
+async function publishToClass() {
+  if (exportBlock()) return;
+  let c = myClass();
+  try {
+    if (!c) {
+      const name = (window.prompt('Name of the class (shown on the subscribe page), for example "III CSE A":') || '').trim();
+      if (!name) return;
+      c = await feedCall('POST', '/api/class', { body: { name } });
+      saveClass(c);
+      renderClass();
+    }
+    const events = state.events.map(({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }) =>
+      ({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }));
+    const r = await feedCall('POST', `/api/class/${c.id}/publish`, { body: { events }, token: c.secret });
+    const clashes = r.clashes.length
+      ? ` ${r.clashes.length} clash${r.clashes.length > 1 ? 'es' : ''} across everything published so far: ${r.clashes.map((x) => `${x.a} x ${x.b} (${x.date})`).join('; ')}.`
+      : ' No clashes across everything published so far.';
+    els.classResult.textContent = `Published: ${r.added} new, ${r.updated} updated, ${r.count} in the class calendar.${clashes} Subscribers see the change on their next refresh.`;
+    els.classResult.dataset.kind = r.clashes.length ? 'error' : 'ok';
+  } catch (err) {
+    els.classResult.textContent = String(err.message || err);
+    els.classResult.dataset.kind = 'error';
+  }
+}
+
+async function copyClassLink() {
+  const c = myClass();
+  if (!c) return;
+  const text = `${c.name}: subscribe once and every notice lands in your calendar. ${c.page}`;
+  try { await navigator.clipboard.writeText(text); els.classResult.textContent = 'Subscribe link copied. Paste it in the class group.'; els.classResult.dataset.kind = 'ok'; }
+  catch { els.classResult.textContent = `Could not copy. The link is: ${c.page}`; els.classResult.dataset.kind = 'error'; }
+}
+
+// A student opens a class: the published events load like a shared link (no notice text, export open).
+async function openClass(idOrLink) {
+  const id = (/\/c\/([a-z0-9]{6,12})/.exec(idOrLink || '') || [, (idOrLink || '').trim()])[1];
+  const say = (msg, kind) => { for (const n of [els.classOpenResult, els.classResult]) { n.textContent = msg; n.dataset.kind = kind; } };
+  if (!/^[a-z0-9]{6,12}$/.test(id)) { say('Paste the class link or its 8-character id.', 'error'); return false; }
+  say('Opening the class...', '');
+  try {
+    const data = await feedCall('GET', `/c/${id}.json`);
+    const events = data.events.filter((e) => !e.cancelled).map((e, i) => workingCopy({ ...e, id: `c${i + 1}`, why: { title: `published to ${data.name}` }, flags: [] }, i));
+    state.decodedText = '';
+    state.result = { warnings: [], pending: [], notes: [] };
+    state.events = events;
+    state.exportNote = null;
+    state.shared = { from: `the class representative of ${data.name}`, on: safeDate((data.updatedAt || '').slice(0, 10)) };
+    state.lastRemoved = null;
+    els.results.hidden = false;
+    renderAll();
+    els.results.focus();
+    say(events.length ? `Opened ${data.name}: ${events.length} event${events.length === 1 ? '' : 's'}.` : `Nothing published in ${data.name} yet.`, 'ok');
+    return true;
+  } catch (err) {
+    say(String(err.message || err), 'error');
+    return false;
+  }
+}
+
+// ---------- paste, share target, install, offline ----------
+
+async function pasteFromClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text.trim()) { showInputError('The clipboard is empty. Copy the notice first.'); return; }
+    els.input.value = text;
+    decode(text, { auto: true });
+  } catch {
+    showInputError('The browser did not allow reading the clipboard. Long-press the box and choose Paste.');
+  }
+}
+
+// WhatsApp -> Share -> Notice Decoder (installed app): the text arrives as ?text= (manifest share_target).
+function fromShareTarget() {
+  const q = new URLSearchParams(location.search);
+  const text = [q.get('title'), q.get('text'), q.get('url')].filter(Boolean).join('\n').trim();
+  if (!text) return false;
+  history.replaceState(null, '', location.pathname);
+  els.input.value = text;
+  decode(text, { auto: true });
+  return true;
+}
+
+function setupInstall() {
+  let deferred = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferred = e;
+    els.install.hidden = false;
+  });
+  els.install.addEventListener('click', async () => {
+    if (!deferred) return;
+    deferred.prompt();
+    await deferred.userChoice;
+    deferred = null;
+    els.install.hidden = true;
+  });
+  window.addEventListener('appinstalled', () => { els.install.hidden = true; });
+}
+
+function setupOffline() {
+  const show = () => { els.offline.hidden = navigator.onLine; };
+  window.addEventListener('online', show);
+  window.addEventListener('offline', show);
+  show();
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('Service worker not registered', err));
+  }
+}
+
 // ---------- wiring ----------
 
 function renderSamples() {
@@ -604,23 +1047,51 @@ function init() {
   renderSamples();
   els.decode.addEventListener('click', () => decode(els.input.value));
   els.clear.addEventListener('click', clearAll);
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    els.paste.hidden = false;
+    els.paste.addEventListener('click', pasteFromClipboard);
+  }
   els.input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       decode(els.input.value);
     }
   });
+  // Auto-decode: a paste decodes at once; typing decodes after a pause. The Decode button stays as the fallback.
+  let typing = null;
+  els.input.addEventListener('paste', () => setTimeout(() => decode(els.input.value), 0));
   els.input.addEventListener('input', () => {
     if (els.input.value.trim()) clearInputError();
+    clearTimeout(typing);
+    typing = setTimeout(() => {
+      const text = els.input.value;
+      if (text.trim().length >= 15 && text !== state.decodedText) decode(text);
+    }, DECODE_DEBOUNCE_MS);
   });
   els.add.addEventListener('click', addManual);
   els.exportBtn.addEventListener('click', downloadIcs);
+  els.gcalAll.addEventListener('click', () => addAllToGoogle());
+  try { els.autoAdd.checked = autoAddOn(); } catch { /* ignore */ }
+  els.autoAdd.addEventListener('change', () => { try { localStorage.setItem(AUTO_ADD_KEY, els.autoAdd.checked ? '1' : '0'); } catch { /* ignore */ } });
+  els.copyBtn.addEventListener('click', copySummary);
+  els.shareBtn.addEventListener('click', shareWithClass);
+  els.waBtn.addEventListener('click', openWhatsApp);
   for (const type of ['mouseover', 'focusin']) {
     els.noticeText.addEventListener(type, (e) => setHot(e, true));
   }
   for (const type of ['mouseout', 'focusout']) {
     els.noticeText.addEventListener(type, (e) => setHot(e, false));
   }
+  els.classPublish.addEventListener('click', publishToClass);
+  els.classLink.addEventListener('click', copyClassLink);
+  els.classJoinBtn.addEventListener('click', () => openClass(els.classJoin.value));
+  els.classJoin.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openClass(els.classJoin.value); } });
+  renderClass();
+  const classInHash = () => { const m = /[#&]c=([a-z0-9]{6,12})\b/.exec(location.hash); return m && feedBase() ? openClass(m[1]) : false; };
+  window.addEventListener('hashchange', () => { if (!loadShared(location.hash) && !classInHash() && state.shared) clearAll(); });
+  setupInstall();
+  setupOffline();
+  if (!fromShareTarget() && !loadShared(location.hash)) classInHash();
 }
 
 init();

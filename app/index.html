@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Notice Decoder</title>
   <meta name="description" content="Paste a college notice. Get clear events, catch clashes, add them to your calendar. Runs in your browser.">
-  <link rel="icon" href="data:,">
+  <meta name="theme-color" content="#3d2c8d">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,9 +16,14 @@
 
   <header class="site-head">
     <div class="wrap">
-      <h1>Notice Decoder</h1>
-      <p class="lede">Paste a college notice. Get clear events, catch clashes, add them to your calendar.</p>
-      <p class="small">Runs in your browser. Your notice never leaves this device.</p>
+      <div class="head-row">
+        <div>
+          <h1>Notice Decoder</h1>
+          <p class="lede">Paste a college notice. Get clear events, catch clashes, add them to your calendar.</p>
+          <p class="small">Runs in your browser. Your notice never leaves this device. <span id="offline-note" hidden>You are offline; everything still works.</span></p>
+        </div>
+        <button type="button" id="install-btn" class="btn small" hidden>Install app</button>
+      </div>
     </div>
   </header>
 
@@ -25,14 +33,23 @@
       <label class="lbl" for="notice-input">Your notice</label>
       <textarea id="notice-input" rows="8" placeholder="Paste the notice from WhatsApp, a PDF or the notice board..." aria-describedby="input-hint input-error"></textarea>
       <p id="input-error" class="error" hidden></p>
-      <p id="input-hint" class="hint">Press Ctrl+Enter (Cmd+Enter on a Mac) to decode.</p>
+      <p id="input-hint" class="hint">Press Ctrl+Enter (Cmd+Enter on a Mac) to decode. On a phone, install the app and share any notice to it straight from WhatsApp.</p>
       <div class="actions">
         <button type="button" id="decode-btn" class="btn primary">Decode notice</button>
+        <button type="button" id="paste-btn" class="btn" hidden>Paste and decode</button>
         <button type="button" id="clear-btn" class="btn">Clear</button>
       </div>
       <div class="samples">
         <span>Try an example:</span>
         <div id="sample-list" class="sample-list"></div>
+      </div>
+      <div id="class-open-row" hidden>
+        <label class="lbl" for="class-join">In a class that publishes its calendar? Open it by link or id</label>
+        <div class="actions join-row">
+          <input id="class-join" type="text" inputmode="text" autocomplete="off" placeholder="https://.../c/abcd2345 or abcd2345">
+          <button type="button" id="class-join-btn" class="btn">Open class</button>
+        </div>
+        <p id="class-open-result" class="status" role="status" aria-live="polite"></p>
       </div>
     </section>
 
@@ -40,7 +57,12 @@
       <p id="summary" class="summary" role="status"></p>
       <ul id="warnings" class="warnings" hidden></ul>
 
-      <section class="card" aria-labelledby="notice-title">
+      <section class="card shared-banner" id="shared-banner" aria-labelledby="shared-title" hidden>
+        <h2 id="shared-title">Shared with your class</h2>
+        <p id="shared-text" class="hint"></p>
+      </section>
+
+      <section class="card" id="notice-card" aria-labelledby="notice-title">
         <h2 id="notice-title">2. Your notice</h2>
         <p class="hint">Highlighted text shows where each event came from. Hover or tap a highlight to see its card. <span id="notice-date"></span></p>
         <div id="notice-text" class="notice-text"></div>
@@ -81,15 +103,40 @@
       </section>
 
       <section class="card" aria-labelledby="export-title">
-        <h2 id="export-title">5. Export</h2>
+        <h2 id="export-title">5. Add to calendar and share</h2>
         <label class="check">
           <input type="checkbox" id="reminders" checked>
           <span>Add reminders</span>
         </label>
         <div class="actions">
-          <button type="button" id="export-btn" class="btn primary">Download calendar file (.ics)</button>
+          <button type="button" id="gcal-all-btn" class="btn primary">Add all to Google Calendar</button>
+        </div>
+        <p id="gcal-note" class="hint"></p>
+        <label class="check">
+          <input type="checkbox" id="auto-add">
+          <span>Add automatically when a shared notice needs no check (Undo stays available)</span>
+        </label>
+        <div class="actions">
+          <button type="button" id="export-btn" class="btn">Download calendar file (.ics)</button>
+          <button type="button" id="copy-btn" class="btn">Copy summary for the class group</button>
+        </div>
+        <p class="hint share-hint">Class representatives: share once, the whole class adds it in one tap. The events travel inside the link; nothing is stored on a server.</p>
+        <div class="actions">
+          <button type="button" id="share-btn" class="btn">Share with class (link)</button>
+          <button type="button" id="wa-btn" class="btn">Send on WhatsApp</button>
         </div>
         <p id="export-status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="card" id="class-section" aria-labelledby="class-title" hidden>
+        <h2 id="class-title">6. Class calendar</h2>
+        <p class="hint">Class representatives publish once; the class subscribes once to a calendar that updates itself when a notice changes. Term-wide clashes are checked on every publish.</p>
+        <p id="class-status" class="hint"></p>
+        <div class="actions">
+          <button type="button" id="class-publish-btn" class="btn primary">Publish to class</button>
+          <button type="button" id="class-link-btn" class="btn" hidden>Copy subscribe link</button>
+        </div>
+        <p id="class-result" class="status" role="status" aria-live="polite"></p>
       </section>
     </div>
   </main>
