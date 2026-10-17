@@ -9,7 +9,8 @@ import { GOOGLE_CLIENT_ID } from './config.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 const CAL_API = 'https://www.googleapis.com/calendar/v3/calendars';
-const TOKEN_KEY = 'nd-gcal-token';
+// The key carries the scope generation: a token saved under the old calendar.events scope is never reused.
+const TOKEN_KEY = 'nd-gcal-token-app-created';
 const CAL_KEY = 'nd-gcal-calendar';
 const CAL_NAME = 'Notice Decoder';
 
@@ -127,7 +128,7 @@ export async function addAll(events, { reminders = true, silent = false } = {}, 
   const out = { added: [], updated: [], failed: [], calendar: CAL_NAME };
   let api;
   try { api = `${CAL_API}/${encodeURIComponent(await calendarId(accessToken, fetchFn))}/events`; } catch (err) {
-    if (err.status === 401) { signOut(); throw new Error('Google sign-in expired. Tap again to sign in.'); }
+    if (err.status === 401 || err.status === 403) { signOut(); throw new Error('Google sign-in expired or missing a permission. Tap again to sign in.'); }
     throw err;
   }
   for (const entry of calendarEntries(events)) {
@@ -143,7 +144,7 @@ export async function addAll(events, { reminders = true, silent = false } = {}, 
         out.added.push({ id: res.id, uid: entry.uid, summary: entry.summary, link: res.htmlLink });
       }
     } catch (err) {
-      if (err.status === 401) { signOut(); throw new Error('Google sign-in expired. Tap again to sign in.'); }
+      if (err.status === 401 || err.status === 403) { signOut(); throw new Error('Google sign-in expired or missing a permission. Tap again to sign in.'); }
       out.failed.push({ uid: entry.uid, summary: entry.summary, error: err.message });
     }
   }
