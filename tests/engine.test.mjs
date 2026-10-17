@@ -325,4 +325,17 @@ test('Calendar colour and emoji: clash red, tight orange, otherwise by type; emo
   assert.ok(e.summary.startsWith('⏰ Deadline:'));
 });
 
+test('Real notice 09 (IKTARA placement drive): one deadline, a title with the subject, the drive itself is "not scheduled yet"', () => {
+  const r = parseNotice(read('09-iktara-placement.txt'), { pastedAt: new Date(2026, 9, 15, 12) });
+  assert.equal(r.events.length, 1);
+  const [e] = r.events;
+  assert.deepEqual([e.type, e.date, e.start], ['deadline', '2026-10-20', '10:00']);
+  assert.equal(e.title, 'Registration deadline: IKTARA Data Sciences Placement Drive');
+  assert.ok(e.flags.some((f) => f.level === 'warn' && /Dussehra/.test(f.msg)));
+  assert.equal(r.pending.length, 1);
+  assert.match(r.pending[0].why, /upcoming days/);
+  const [entry] = calendarEntries(r.events);
+  assert.equal(entry.summary, '⏰ Registration deadline: IKTARA Data Sciences Placement Drive (by 10:00 AM)');
+});
+
 console.log(`\n${passed} passed`);

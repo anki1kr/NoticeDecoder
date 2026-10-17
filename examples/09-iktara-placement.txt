@@ -1,0 +1,44 @@
+ACEM/CRC/Batch-2027-39                                                                                                                                                                                                                            Dated: 15-10-2026
+
+Notice for IKTARA Data Sciences Private Limited Placement Drive
+
+It is hereby to inform all the B.Tech-CSE & AIML (2027) passing out batch students that "IKTARA Data Sciences Private Limited" is planning for the placement drive in upcoming days to hire the engineering/management freshers from the 2027 passing out batch.
+
+All the important details about the placement drive are given below:-
+
+Brief Overview of the organization:-
+
+IKTARA Data Sciences Private Limited is a product and engineering services company providing software solutions across data science, cloud computing, and wireless technology. We are an R&D-focused organization helping our customers leverage advancements in data science and cloud technologies to transform their businesses for the AI-first era. We are a partner of NVIDIA's Inception Program for AI and data science startups and participate in AWS's Activate program. We have also been recognized as a promising AI startup by the Government of India. Our founders are IT industry veterans with over 25 years of experience.
+Company Website: https://www.iktara.ai/
+LinkedIn: https://www.linkedin.com/company/iktara
+We are pleased to inform you that IKTARA will be launching its Internship-Cum-Employment Program in January 2027, and we would like to collaborate with your institution to identify talented and motivated students for this opportunity.
+We are looking to hire fresh talent for the role of Data Science Intern / Engineer. We request your support in sharing this opportunity with eligible students and connecting us with suitable candidates who are interested in building their careers in software development, data science and emerging technologies.
+Position Details
+Role: Data Science Intern / Engineer
+Location: Puri Business Hub, Sector 81, Faridabad, Haryana
+Eligible Qualifications: B.Tech/B.E./MCA
+Internship Start Date: January 2027
+Stipend During Internship: ₹15,000 per month
+Full-Time CTC Upon Employment: ₹3.6 LPA – ₹4 LPA
+Program Type: Internship-Cum-Employment
+Required Skills and Competencies
+We are looking for candidates who possess the following skills and attributes:
+A good overall academic record and a willingness to learn new skills.
+Good communication skills, a positive attitude, and a problem-solving aptitude.
+Hands-on experience in at least one programming language, such as C, C++, or Python.
+Working knowledge of Python, including data processing libraries such as Pandas and NumPy, along with Python machine learning libraries.
+Knowledge of at least one Python-based framework, preferably Django, and experience or understanding of building REST APIs.
+Basic testing and debugging skills for software solutions.
+Exposure to CI/CD concepts and practices.
+Important: Internship-Cum-Employment Terms
+Please ensure that students clearly understand the following terms before applying:
+This opportunity is an internship-cum-employment program, with the internship commencing in January 2027 and the possibility of a full-time appointment upon successful completion and fulfilment of the company's requirements.
+The internship stipend will be ₹15,000 per month. The full-time CTC upon employment will be between ₹3.6 LPA and ₹4 LPA.
+The position carries a bond period of 18–24 months, as specified in the applicable offer and contractual documents.
+Students should apply only if they are comfortable with the bond terms and are willing to honour their contractual commitments for the agreed period.
+Candidates must carefully review and understand the bond conditions before accepting the offer. Students who are unwilling to commit to the agreed period should not apply.
+Interested students have to submit their registrations through the link given below by 20th October 2026 before 10:00 AM.
+
+Registration Link: https://forms.gle/yYkjdyk7dopNZ2jz8
+
+Note: All students must upload their updated CVs strictly in the attached resume format only.

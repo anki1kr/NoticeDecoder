@@ -39,7 +39,7 @@ const compact = (isoDateTime) => isoDateTime.replace(/[-:]/g, '');
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'event';
 
 const titleOf = (e) => (e.title || '').trim() || 'Event';
-const summaryOf = (e) => (e.type === 'deadline' ? `Deadline: ${titleOf(e)}${e.start ? ` (by ${fmt12(e.start)})` : ''}` : titleOf(e));
+const summaryOf = (e) => (e.type === 'deadline' ? `${/deadline/i.test(titleOf(e)) ? '' : 'Deadline: '}${titleOf(e)}${e.start ? ` (by ${fmt12(e.start)})` : ''}` : titleOf(e));
 
 // Start and end. A deadline is a point; it is shown as the 30 minutes leading up to it.
 // Timed: "YYYY-MM-DDTHH:MM:00" in Asia/Kolkata. All-day: "YYYY-MM-DD" with an exclusive end date.

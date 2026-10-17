@@ -27,7 +27,7 @@ const REVISED = /\b(postponed|rescheduled|preponed|pre-poned|shifted|moved|chang
 const RANGE_JOIN = /^\s*(?:,|and|&|to|till|until|-|–|aur|और|व|से)\s*$/i;
 
 const LABEL_LINE = /^[^\p{L}\p{N}\n]*\s*(date|day|time|timings?|venue|place|location|platform|mode|eligibility|participation|duration|reporting time|दिनांक|तिथि|समय|स्थान)\s*[:\-–]/iu;
-const VAGUE = /\b((?:this|next|coming)\s+(?:week|month)(?:\s+or\s+(?:this|next)\s+(?:week|month))?|next working days?|will be (?:confirmed|announced|intimated|informed|notified|decided)|to be (?:announced|decided|confirmed|notified)|TBD|TBA)\b/i;
+const VAGUE = /\b((?:in|within|over)\s+(?:the\s+)?(?:upcoming|coming|next\s+few)\s+days|(?:this|next|coming)\s+(?:week|month)(?:\s+or\s+(?:this|next)\s+(?:week|month))?|next working days?|will be (?:confirmed|announced|intimated|informed|notified|decided)|to be (?:announced|decided|confirmed|notified)|TBD|TBA)\b/i;
 const DEADLINE_CUE = /\b(by|before|latest by|not later than|within|till|until|on or before|तक)\b[^.\n]{0,25}$/iu;
 const END_CUE = /^\W*(?:and\s+)?(?:(?:will\s+|would\s+|should\s+)?(?:ends?|close[sd]?|finish(?:es)?|get over|conclude[sd]?|be over)\s+(?:by|at|around)|to|till|until|upto|up to)\W*$/i;
 const NOTE = /^(note\b[\s:\-–]*|please (?:do not|don['’]t|note|ensure|carry|bring)|do not|don['’]t|also ensure|ensure|make sure|carry|bring|mandatory|compulsory|students (?:must|should))/i;
@@ -181,10 +181,12 @@ function titleFor(str, k) {
   if (topic && /^[A-Z]/.test(topic[2])) return { title: `${cap(topic[1].toLowerCase())}: ${topic[2].trim()}`, why: `"${topic[0].trim()}" names the topic.`, at: [topic.index, topic.index + topic[0].length] };
   const last = /\blast (?:date|day) (?:to|for) (?:the )?(.{3,40}?)(?=\s+(?:is|on|:)\b|[,:.!?]|$)/i.exec(str);
   if (last) return { title: cap(last[1]), why: `"${last[0]}" names what is due.`, at: [last.index, last.index + last[0].length] };
-  const verbObj = /\b(submit|upload|send|mail|register|pay|fill)\s+(?:your|the|all|their|his|her|in)?\s*([a-z][\w ]{2,40}?)\s+(?:by|before|on or before|latest by|till|not later than)\b/i.exec(str);
+  const verbObj = /\b(submit|upload|send|mail|register|pay|fill)\s+(?:your|their|the|all|his|her|in)?\s*([a-z][\w ]{2,60}?)\s+(?:by|before|on or before|latest by|till|not later than)\b/i.exec(str);
   if (verbObj) {
     const obj = verbObj[2].split(/\s+(?:of|for|in|on|to|at|through|via)\s+/i)[0].trim();
     const noun = { submit: 'submission', upload: 'upload', send: 'submission', mail: 'submission', register: 'registration', pay: 'payment', fill: 'form' }[verbObj[1].toLowerCase()];
+    const objNoun = obj && /^(registration|submission|application|payment|upload|form)s?$/i.exec(obj);
+    if (objNoun) return { title: `${cap(objNoun[1].toLowerCase())} deadline`, why: `"${verbObj[0]}" is a deadline.`, at: [verbObj.index, verbObj.index + verbObj[0].length] };
     if (obj && !/^\d/.test(obj)) return { title: `${cap(obj.toLowerCase())} ${noun}`, why: `"${verbObj[0]}" says what is due.`, at: [verbObj.index, verbObj.index + verbObj[0].length] };
   }
   const by = /\b(submit|register|apply|pay|upload|fill)\w*\s+(?:by|before|on or before|latest by)\b/i.exec(str);
@@ -477,9 +479,11 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
   }
   attachLinks(text, events, us);
 
+  const subject = subjectOf(text);
   for (const ev of events) {
     const full = upgradeTitle(ev.title, text, ev.family);
     if (full !== ev.title) { ev.why.title = `"${ev.title}" is called "${full}" elsewhere in the notice.`; ev.title = full; }
+    if (subject && ev.type === 'deadline' && /^(registration|submission|application|payment|upload|form) deadline$/i.test(ev.title)) { ev.title = `${ev.title}: ${subject}`; ev.why.title += ` Named after the notice subject "${subject}".`; }
     if (ev.date && !ev.start) ev.flags.push({ field: 'start', level: 'info', msg: 'No time given; it will be an all-day event.' });
     // A known duration gives the end time, so the clash check and the calendar file use the same length.
     if (ev.start && !ev.end && ev.durationMin && !ev.point && ev.type !== 'deadline') {
@@ -574,6 +578,14 @@ function dateSpread(ev, ud, text) {
   } else {
     ev.flags.push({ field: 'date', level: 'warn', msg: `This part mentions more than one date (${abs.map((x) => prettyDate(x.date)).join(', ')}). We used the first; check it.` });
   }
+}
+
+// "Notice for IKTARA Data Sciences Private Limited Placement Drive" -> "IKTARA Data Sciences Placement Drive".
+function subjectOf(text) {
+  const m = /^[ \t]*(?:notice|circular)\s+(?:for|regarding|about|on)\s+(.{6,100}?)[ \t]*$/im.exec(text);
+  if (!m) return null;
+  const s = m[1].replace(/\b(?:private limited|pvt\.?\s*ltd\.?|limited|ltd\.?)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+  return s.length >= 6 ? s.slice(0, 60) : null;
 }
 
 function addPending(result, u, k, vague) {
