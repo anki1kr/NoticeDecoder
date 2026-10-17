@@ -107,7 +107,7 @@ test('Google Calendar link: same times as the .ics, deadline as the 30 min befor
   assert.equal(gcalUrl({ ...pick(r, 'Internal Test 2'), date: null }), null);
 });
 
-// Cases found by the judge agents (tmp/judge1, tmp/judge3).
+// Messy real-world cases: postponed exams, fee deadlines, multi-day runs, emoji forwards.
 const one = (t) => parseNotice(t, { pastedAt }).events;
 
 test('Postponed: the new date and time win, the old one is shown', () => {

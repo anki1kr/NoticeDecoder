@@ -13,6 +13,7 @@ from pathlib import Path
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.dml import MSO_LINE_DASH_STYLE
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
@@ -21,12 +22,13 @@ ROOT = Path(__file__).resolve().parent.parent
 SHOTS = ROOT / 'tmp' / 'deck'
 OUT = Path(os.environ.get('DECK_OUT', ROOT / 'deck' / 'NoticeDecoder_NovaNexus_PS02.pptx'))  # DECK_OUT: preview path while the deck is open
 LIVE = 'https://anki1kr.me/NoticeDecoder/'
-SKILL = Path.home() / '.claude' / 'skills' / 'sih-deck'
-TEMPLATE = SKILL / 'assets' / 'SIH2026-IDEA-Presentation-Format.pptx'
-sys.path.insert(0, str(SKILL / 'scripts'))
-import _env  # noqa: E402,F401  (the skill's own copy of segno)
-import segno  # noqa: E402
-from deck_lib import heading_band  # noqa: E402
+VIDEO = 'https://youtu.be/joI75POVTr0'    # checked public with yt_check.py
+REPO = 'https://github.com/anki1kr/NoticeDecoder'
+TEMPLATE = ROOT / 'deck' / 'template' / 'SIH2026-IDEA-Presentation-Format.pptx'   # the SIH idea template, used as the frame
+try:
+    import segno  # QR codes
+except ImportError:
+    sys.exit('pip install segno python-pptx pillow')
 
 NAVY = RGBColor(0x1F, 0x49, 0x7D)      # the template's dk2 (title and heading navy)
 INK = RGBColor(0x26, 0x2A, 0x33)
@@ -248,7 +250,7 @@ def table(slide, x, y, w, col_w, rows, size=13, head=14, row_h=0.36):
 
 
 def qr(slide, url, x, y, size, label):
-    path = SHOTS / 'qr-live.png'
+    path = SHOTS / f"qr-{''.join(c for c in label.lower() if c.isalnum())}.png"
     segno.make(url, error='m').save(str(path), scale=12, border=2)
     pic = slide.shapes.add_picture(str(path), Inches(x), Inches(y), Inches(size), Inches(size))
     pic.line.color.rgb = LINE; pic.line.width = Pt(0.75)
@@ -322,7 +324,7 @@ for sh in s.shapes:
         # the template's six bullet lines (blank spacer paragraphs between them are kept)
         lines = [q for q in sh.text_frame.paragraphs if q.text.strip()]
         values = [('Problem Statement ID – ', 'PS-02'), ('Problem Statement Title – ', 'Notice Decoder'),
-                  ('Realm – ', 'Forge Realm'), ('Category – ', 'Software (web + Android)'),
+                  ('Realm – ', 'Forge Realm'), ('Category – ', 'Software (web app)'),
                   ('Team Name – ', 'Nova Nexus'), ('Members – ', 'Ankit Kumar (Leader), Ankit, Ashwani Tanwar')]
         for q, (lab, val) in zip(lines, values):
             first = q.runs[0]
@@ -331,77 +333,84 @@ for sh in s.shapes:
             first.text = lab; first.font.size = Pt(18)
             r = q.add_run(); r.text = val; r.font.size = Pt(18); r.font.bold = False
             q.alignment = PP_ALIGN.LEFT
-text(s, 0.5, 1.95, 7.0, 0.6, 'A notice lands in the class group. It is in your calendar before you open the chat.', 16, GREY)
+text(s, 0.5, 1.95, 7.0, 0.6, 'Paste a college notice. Its dates go into your calendar, with clashes marked.', 16, GREY)
 s.shapes[-1].text_frame.paragraphs[0].runs[0].font.italic = True
 ph = shot(s, SHOTS / 'phone-results-crop.png', 7.75, 1.45, 2.55)
-qr(s, LIVE, 10.75, 2.2, 1.75, 'Live demo')
-text(s, 10.35, 4.6, 2.6, 0.9, 'Scan to open the working app on your phone.', 13, GREY, align=PP_ALIGN.CENTER)
+for i, (url, label) in enumerate([(VIDEO, 'Demo video'), (LIVE, 'Website'), (REPO, 'GitHub')]):
+    qr(s, url, 11.15, 1.2 + i * 1.85, 1.2, label)
 text(s, 10.4, 0.25, 2.75, 0.4, 'Forge Realm  |  PS-02', 14, GREY, align=PP_ALIGN.RIGHT)
 
 # ---------------------------------------------------------------- 2. the idea
 ACC = PAL['yellow']
 s = S[1]; frame(s, 'NOTICE DECODER')
-band(s, 0.45, 1.3, 12.43, 'Proposed solution')
-text(s, 0.45, 1.78, 12.43, 0.5, '**Paste, share or auto-read** a college notice. It becomes ==calendar events==, **clashes** are found, and the student is asked only about an ==uncertain field==.', 15)
-sh_h = shot(s, SHOTS / 'shot-solution.png', 0.95, 2.45, 6.6,
+band(s, 0.45, 1.3, 6.15, 'The problem')
+text(s, 0.45, 1.78, 6.15, 0.7, 'Notices come as long paragraphs. Students miss dates, and find clashes too late.', 15)
+band(s, 6.73, 1.3, 6.15, 'Our idea')
+text(s, 6.73, 1.78, 6.15, 0.7, 'Paste a notice. The app finds each event, shows the words it read, checks for clashes and adds the ==calendar events==.', 15)
+sh_h = shot(s, SHOTS / 'shot-solution.png', 0.95, 2.6, 6.6,
             pins=[(1, (PART_Y[0] + 51) / comp.height), (2, (PART_Y[1] + 330) / comp.height), (3, (PART_Y[2] + 190) / comp.height)])
-text(s, 0.55, 2.55 + sh_h, 7.0, 0.4, '**1** The answer first      **2** Highlighter shows the source words      **3** One clean line per event', 13)
-band(s, 7.85, 2.45, 5.03, 'How it addresses the problem')
-text(s, 7.85, 2.95, 5.03, 1.5, ['**Every field shows why:** the exact words it came from.',
-                                '**Clash check:** overlap, and a deadline that falls inside another event.',
-                                '**One tap** to Google Calendar; .ics and a class link as backups.'], 14, space=5)
-band(s, 7.85, 4.45, 5.03, 'Innovation and uniqueness')
-text(s, 7.85, 4.95, 5.03, 1.1, ['**Plain rules on the phone**, no AI: same answer every time, the notice never leaves the device.',
-                                '**Asks, never guesses:** "Thursday, but 13 Nov 2026 is a Friday."'], 14, space=5)
+text(s, 0.55, 2.7 + sh_h, 7.0, 0.4, '**1** The answer first     **2** Each date shows the words it came from     **3** One line per event', 13)
+band(s, 7.85, 2.6, 5.03, 'Why it is different')
+text(s, 7.85, 3.1, 5.03, 2.9, ['**Shows its working.** Every date, time and room points to the words it came from.',
+                               '**Asks when unsure.** "Thursday? But 13 Nov 2026 is a Friday."',
+                               '**Finds clashes.** Two events at once, or a deadline during a class.',
+                               '**No AI.** Same answer every time, and the reading happens on the phone.'], 14, space=7)
 headline(s, 7.85, 6.05, 5.03, 0.78, '3 of 3 events right', 'and both clashes found on the PS-02 example', bs=20, ls=13)
 
 # ---------------------------------------------------------------- 3. technical approach
 ACC = PAL['blue']
 s = S[2]; frame(s, 'TECHNICAL APPROACH')
-band(s, 0.45, 1.3, 5.45, 'Technologies used')
-text(s, 0.45, 1.85, 5.45, 3.6, ['**Engine:** plain JavaScript rules; runs in the browser. No server, no AI model.',
-                                '**Inputs:** paste or share (installable web app), photos and PDFs read on the device, a Gmail Apps Script, an Android companion app.',
-                                '**Calendar:** .ics file (India time, reminders), Google Calendar in one tap, a class feed on a free Cloudflare Worker.',
-                                f'**Tests on every push:** {N_ENGINE} engine, {N_WORKER} feed, {N_GMAIL} Gmail, {N_APP} app tests; {N_BROWSER} browser checks.'], 14, space=10)
-text(s, 0.45, 5.55, 5.45, 1.2, ['**One engine everywhere:** the web app, the Gmail script and the Android app run the same bundled rules file.'], 14)
-band(s, 6.2, 1.3, 6.68, 'Methodology')
-ins = ['Paste or share', 'Photo or PDF', 'College email', 'WhatsApp group']
-for i, (k, c) in enumerate(zip(ins, ('yellow', 'pink', 'orange', 'green'))):
-    box(s, 6.2, 1.95 + i * 0.75, 1.75, 0.6, k, None, keycol=INK, edge=PAL[c]['ink'], fill=PAL[c]['mark'], ks=13, center=True, lw=1.25)
+band(s, 0.45, 1.3, 5.45, 'What we use')
+text(s, 0.45, 1.85, 5.45, 3.9, ['**App:** a web page in plain JavaScript. It runs in the browser, so it works offline.',
+                                '**Reading rules:** dates (13 Nov, 13/11/2026), times (2 PM, 14:00, 12 noon), rooms, and words like "postponed to".',
+                                '**Photos and PDFs:** read on the phone; every date from a photo is marked for a check.',
+                                '**Calendar:** an .ics file, Google Calendar in one tap, or a class calendar link from a free Cloudflare Worker.',
+                                f'**Tested:** {N_ENGINE} rule tests and {N_BROWSER} browser checks run on every change.'], 14, space=9)
+band(s, 6.2, 1.3, 6.68, 'How a notice becomes events')
+ins = [('Paste or share', 'yellow', False), ('Photo or PDF', 'pink', False), ('College email', 'orange', True), ('WhatsApp group', 'green', True)]
+for i, (k, c, later) in enumerate(ins):
+    b = box(s, 6.2, 1.95 + i * 0.75, 1.75, 0.6, k, None, keycol=INK, edge=PAL[c]['ink'], fill=PAL[c]['mark'] if not later else WHITE, ks=13, center=True, lw=1.25)
+    if later:
+        b.line.dash_style = MSO_LINE_DASH_STYLE.DASH
     connector(s, 7.95, 2.25 + i * 0.75, 8.45, 3.05)
-core = box(s, 8.45, 2.45, 2.0, 1.2, 'Rules engine', 'dates, times, rooms; a reason for every field', keycol=WHITE, edge=NAVY, fill=NAVY, ks=15, ds=12)
+core = box(s, 8.45, 2.45, 2.0, 1.2, 'Reading rules', 'find dates, times and rooms; keep a reason for each', keycol=WHITE, edge=NAVY, fill=NAVY, ks=15, ds=12)
 for p in core.text_frame.paragraphs[1:]:
     for r in p.runs: r.font.color.rgb = WHITE
-box(s, 10.85, 1.95, 2.03, 0.95, 'Nothing uncertain', 'added, with Undo', keycol=GREEN, edge=GREEN, ks=13, ds=12, lw=1.5)
-box(s, 10.85, 3.15, 2.03, 0.95, 'An amber field', 'asks only for that one', keycol=AMBER, edge=AMBER, ks=13, ds=12, lw=1.5)
+box(s, 10.85, 1.95, 2.03, 0.95, 'Sure', 'added, with Undo', keycol=GREEN, edge=GREEN, ks=14, ds=12, lw=1.5)
+box(s, 10.85, 3.15, 2.03, 0.95, 'Not sure', 'asks you first', keycol=AMBER, edge=AMBER, ks=14, ds=12, lw=1.5)
 connector(s, 10.45, 2.9, 10.85, 2.42)
 connector(s, 10.45, 3.2, 10.85, 3.62)
-box(s, 8.45, 4.55, 2.0, 1.0, 'Clash check', 'overlap; a deadline is a point', ks=14, ds=12)
+box(s, 8.45, 4.55, 2.0, 1.0, 'Clash check', 'two events at once? a deadline in a class?', ks=14, ds=12)
 connector(s, 9.45, 3.65, 9.45, 4.55)
-box(s, 10.85, 4.55, 2.03, 1.0, 'Calendar', 'Google, phone, class feed, .ics', ks=14, ds=12)
+box(s, 10.85, 4.55, 2.03, 1.0, 'Calendar', 'Google, phone or .ics file', ks=14, ds=12)
 connector(s, 10.45, 5.05, 10.85, 5.05)
-text(s, 6.2, 5.8, 6.68, 1.0, ['Re-adding a notice ==updates== the same calendar events instead of copying them (one ID per event).'], 14)
+text(s, 6.2, 5.75, 6.68, 1.1, ['Dashed boxes need a one-time install: the Gmail script or the Android app.',
+                               'Adding the same notice twice ==updates the events==. It does not make copies.'], 13, space=5)
 
-# ---------------------------------------------------------------- 4. feasibility
+# ---------------------------------------------------------------- 4. scope and feasibility
 ACC = PAL['green']
-s = S[3]; frame(s, 'FEASIBILITY AND VIABILITY')
-band(s, 0.45, 1.3, 5.6, 'Works today')
-shot(s, SHOTS / 'phone-amber-top.png', 0.45, 1.85, 2.35)
-for i, (k, d) in enumerate([('Live now', 'anki1kr.me/NoticeDecoder'),
-                            ('Tested', f'{N_ENGINE + N_WORKER + N_GMAIL + N_APP} tests, {N_BROWSER} browser checks, {N_NOTICES} real notices'),
-                            ('₹0 per notice', 'runs on the phone; the class feed fits a free tier')]):
-    box(s, 3.0, 1.85 + i * 1.12, 3.05, 0.98, '✓ ' + k, d, keycol=GREEN, edge=GREEN, ks=15, ds=13, lw=1.25)
-text(s, 3.0, 5.3, 3.05, 1.5, 'Left: a doubtful date is outlined in amber; export waits until it is fixed or marked "Looks right".', 13, GREY)
-band(s, 6.35, 1.3, 6.53, 'Challenges and how we handle them')
-pairs = [('Long notice cut off in a notification', 'Share or paste reads the full text'),
-         ('Google refreshes a subscribed feed every 12 to 24 h', 'One-tap add writes events at once'),
-         ('Reading WhatsApp needs Android (iOS blocks it)', 'On iPhone: paste, or the Gmail script'),
-         ('Spelling mistakes ("tset", "Nvo")', 'Date stays empty; export stays locked')]
+s = S[3]; frame(s, 'SCOPE AND FEASIBILITY')
+band(s, 0.45, 1.3, 5.75, 'What is ready')
+scope = [('Works now on the website', GREEN, False,
+          'Paste or share a notice, a photo or a PDF. Events with reasons, clash check, review before export, .ics file, Hindi and Hinglish times. A class calendar link: the class rep publishes, the class subscribes.'),
+         ('Built, needs a one-time install or sign-in', AMBER, True,
+          'Google Calendar in one tap (Google sign-in), college email (Gmail script), WhatsApp group reading (Android app), Chrome extension.'),
+         ('Next', NAVY, False,
+          'Try it with one real class for a term. Read more notice styles. Handle spelling mistakes.')]
+for i, (k, col, dashed, d) in enumerate(scope):
+    b = box(s, 0.45, 1.88 + i * 1.62, 5.75, 1.45, k, d, keycol=col, edge=col, ks=15, ds=13, lw=1.5)
+    if dashed:
+        b.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+band(s, 6.5, 1.3, 6.38, 'Problems we expect, and our plan')
+pairs = [('A long notice is cut off in a phone notification', 'Share or paste the full text'),
+         ('Google updates a shared calendar only every 12 to 24 hours', 'One-tap add writes the events at once'),
+         ('iPhone does not let apps read WhatsApp', 'On iPhone, paste the notice or use the email script'),
+         ('Spelling mistakes ("tset", "Nvo")', 'The date stays empty and export stays locked')]
 for i, (risk, fix) in enumerate(pairs):
     y = 1.9 + i * 1.18
-    box(s, 6.35, y, 2.85, 0.98, risk, None, keycol=RED, edge=RED, ks=13, lw=1.25)
-    connector(s, 9.22, y + 0.49, 9.62, y + 0.49)
-    box(s, 9.65, y, 3.23, 0.98, fix, None, keycol=GREEN, edge=GREEN, ks=13, lw=1.25)
+    box(s, 6.5, y, 2.85, 0.98, risk, None, keycol=RED, edge=RED, ks=13, lw=1.25)
+    connector(s, 9.37, y + 0.49, 9.72, y + 0.49)
+    box(s, 9.75, y, 3.13, 0.98, fix, None, keycol=GREEN, edge=GREEN, ks=13, lw=1.25)
 
 # ---------------------------------------------------------------- 5. impact and who pays
 ACC = PAL['orange']
@@ -409,34 +418,48 @@ s = S[4]; frame(s, 'IMPACT AND WHO PAYS')
 band(s, 0.45, 1.3, 6.1, 'Who gains what')
 table(s, 0.45, 1.85, 6.1, [1.35, 2.3, 2.45],
       [['Who', 'Today', 'With Notice Decoder'],
-       ['Student', 'Reads a paragraph, misses a date', 'Events in the calendar; checks only amber fields'],
+       ['Student', 'Reads a long paragraph, misses a date', 'Gets the dates in the calendar; checks only the unsure ones'],
        ['Class rep', 'Forwards every notice by hand', 'Publishes once; the class subscribes once'],
-       ['Department', 'Clashes found too late', 'A clash report across the term']], 13, 14, 0.62)
-text(s, 0.45, 4.6, 6.1, 2.2, ['**For scale:** Fedena, a full college ERP, lists $999 to $1,699 a year for a whole college, so one feature for one department must cost far less.',
-                              '**Honest status:** no college has paid yet.'], 14, space=8)
-band(s, 6.85, 1.3, 6.03, 'Business model')
-headline(s, 6.85, 1.85, 6.03, 0.95, '₹2,999 per department per year', 'proposed price; the first term is free', bs=24, ls=14)
-text(s, 6.85, 2.95, 6.03, 3.9, ['**Free for every student:** paste, share or auto-read; clashes; Google Calendar, .ics, class link. Costs us about ₹0.',
-                                '**Department plan:** the class rep or a teacher publishes; the HOD signs off. One free-tier Worker and storage.',
-                                '**Why pay when WhatsApp is free?** Nobody\'s calendar moves when a date changes; the plan ==moves it for everyone== and catches term-wide clashes.',
-                                '**Pilot:** one department, one term; it works if the HOD pays for the next term.'], 14, space=9)
+       ['Department', 'Finds clashes too late', 'Sees every clash in the term']], 13, 14, 0.62)
+text(s, 0.45, 4.6, 6.1, 2.2, ['**For scale:** Fedena, a full college ERP, lists $999 to $1,699 a year for a whole college. One feature for one department must cost far less.',
+                              '**Where we are:** no college has paid yet.'], 14, space=8)
+band(s, 6.85, 1.3, 6.03, 'Who pays')
+headline(s, 6.85, 1.85, 6.03, 0.95, '₹2,999 per department per year', 'our proposed price; the first term is free', bs=24, ls=14)
+text(s, 6.85, 2.95, 6.03, 3.9, ['**Free for students:** everything in "Works now". It runs on the phone, so it costs us about ₹0.',
+                                '**Department plan:** the class rep or a teacher publishes notices, and the HOD pays.',
+                                '**Why pay?** On WhatsApp, nobody\'s calendar changes when a date changes. With the plan, it changes ==for the whole class==.',
+                                '**Pilot:** one department for one term. If the HOD pays for the next term, it works.'], 14, space=9)
 
 # ---------------------------------------------------------------- 6. research and references
 ACC = PAL['lavender']
 s = S[5]; frame(s, 'RESEARCH AND REFERENCES')
-band(s, 0.45, 1.3, 8.2, 'Other notice tools: we read their code (Oct 2026)')
+band(s, 0.45, 1.3, 8.2, 'Other notice tools (we read their code, Oct 2026)')
 table(s, 0.45, 1.85, 8.2, [4.6, 1.8, 1.8],
       [['Project', 'Calendar file', 'Clash check'],
-       ['7 public notice tools on GitHub, most send text to an AI model', '0 of 7', '0 of 7'],
+       ['7 notice tools on GitHub, most send the text to an AI model', '0 of 7', '0 of 7'],
        ['edt-tamis: university timetable files, not notices', 'Yes', 'Yes'],
        ['Notice Decoder', 'Yes', 'Yes, with the reason']], 13, 14, 0.5)
 band(s, 0.45, 4.05, 8.2, 'Why the problem is real')
-text(s, 0.45, 4.55, 8.2, 2.3, ['**APSIT Mumbai** moved notices out of WhatsApp groups: "many students miss important notices" (e-notice board post, 23 Sep 2025).',
-                               '**Jamia Millia Islamia** keeps academic notices in official class groups run by the class representative (Careers360, 9 Sep 2026).',
-                               '**St Agnes College, Mangaluru** set semester exams in the Dasara holidays; students protested (PTI via Careers360, 12 Oct 2026).',
-                               '**Price anchor:** fedena.com/pricing-and-plans.  **Problem statement:** SETU 2026 Forge Realm PS-02.'], 13, space=6)
-qr(s, LIVE, 9.55, 1.6, 2.4, 'Live demo')
-text(s, 9.05, 4.5, 3.4, 1.2, ['**anki1kr.me/NoticeDecoder**', 'Works in any browser; nothing to install.'], 13, GREY, NAVY, PP_ALIGN.CENTER)
+text(s, 0.45, 4.55, 8.2, 2.3, ['**APSIT Mumbai** stopped sharing notices in WhatsApp groups because "many students miss important notices" (e-notice board post, 23 Sep 2025).',
+                               '**Jamia Millia Islamia** keeps academic notices in official class groups run by the class rep (Careers360, 9 Sep 2026).',
+                               '**St Agnes College, Mangaluru** set semester exams in the Dasara holidays, and students protested (PTI via Careers360, 12 Oct 2026).',
+                               '**Price:** **fedena.com/pricing-and-plans**.  **Problem statement:** SETU 2026 Forge Realm PS-02.'], 13, space=6)
+LINKS = {'fedena.com/pricing-and-plans': 'https://fedena.com/pricing-and-plans', 'youtu.be/joI75POVTr0': VIDEO,
+         'anki1kr.me/NoticeDecoder': LIVE, 'github.com/anki1kr/NoticeDecoder': REPO}
+def link_runs(shape):
+    # A run whose whole text is a known address becomes a click-through link in the PDF.
+    for p in shape.text_frame.paragraphs:
+        rs = p.runs
+        for r in rs:
+            if r.text in LINKS:
+                r.hyperlink.address = LINKS[r.text]
+        if rs and rs[-1].text in LINKS:
+            p.add_run().text = ' '   # a plain run after a closing link keeps PowerPoint's PDF export from dropping it
+link_runs(s.shapes[-1])
+for i, (url, label) in enumerate([(VIDEO, 'Demo video'), (LIVE, 'Website'), (REPO, 'GitHub')]):
+    qr(s, url, 9.2 + i * 1.3, 1.5, 1.1, label)
+text(s, 8.95, 3.3, 4.0, 1.6, ['**youtu.be/joI75POVTr0**', '**anki1kr.me/NoticeDecoder**', '**github.com/anki1kr/NoticeDecoder**'], 13, GREY, NAVY, PP_ALIGN.CENTER, space=3)
+link_runs(s.shapes[-1])
 
 OUT.parent.mkdir(exist_ok=True)
 prs.save(OUT)

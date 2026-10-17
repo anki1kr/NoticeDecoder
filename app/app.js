@@ -1,5 +1,5 @@
 // Notice Decoder UI. Vanilla ES module, no build step.
-// Engine contract: ./engine/parse.js, ./engine/clash.js, ./engine/ics.js (see AGENTS.md).
+// Engine contract: ./engine/parse.js, ./engine/clash.js, ./engine/ics.js.
 import { parseNotice } from './engine/parse.js';
 import { findClashes } from './engine/clash.js';
 import { toICS, gcalUrl } from './engine/ics.js';

@@ -7,3 +7,22 @@ companion/ios/
 companion/.expo/
 worker/node_modules/
 worker/.wrangler/
+
+# Python
+__pycache__/
+*.pyc
+# Office lock files (a deck open in PowerPoint)
+~$*
+# Logs, editors, OS
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+# Local secrets for wrangler / env variants
+.dev.vars
+.env.*
+# Team working notes, kept local
+AGENTS.md
+CLAUDE.md
+research/

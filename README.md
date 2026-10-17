@@ -2,7 +2,11 @@
 
 **SETU 2026 · Forge Realm · PS-02.** Paste a messy college notice. Get clear events, catch clashes, add them to your calendar.
 
-**Live demo: https://anki1kr.me/NoticeDecoder/app/** · Runs fully in the browser: the notice never leaves your device. Installs as an app (add to home screen); once installed it opens offline and appears in WhatsApp's **Share** sheet, so a notice goes from the class group to decoded events in two taps.
+| Demo video | Website | Code |
+|---|---|---|
+| https://youtu.be/joI75POVTr0 | https://anki1kr.me/NoticeDecoder/ | https://github.com/anki1kr/NoticeDecoder |
+
+Runs fully in the browser: the notice never leaves your device. Installs as an app (add to home screen); once installed it opens offline and appears in WhatsApp's **Share** sheet, so a notice goes from the class group to decoded events in two taps.
 
 ## Zero-touch (2026-10-15)
 
@@ -74,7 +78,10 @@ AI is not needed for any of this, so results are the same every time, cost nothi
 - **Cost to run:** the rules run on the student's phone, so each notice costs us about nothing; hosting fits a free static tier.
 - Honest status: no college has paid yet; the next step is a one-department pilot.
 
-Sources and the full market research: `research/SYNTHESIS.md`.
+Sources: [APSIT e-notice board post, 23 Sep 2025](https://elearn.apsit.edu.in/moodle/mod/forum/discuss.php?d=65) ·
+[Jamia class groups, Careers360, 9 Sep 2026](https://news.careers360.com/jamia-asks-students-deans-hod-to-avoid-unofficial-class-groups-jmi-channel) ·
+[St Agnes exams in Dasara holidays, PTI via Careers360, 12 Oct 2026](https://news.careers360.com/mangaluru-st-agnes-students-protest-against-administration-for-scheduling-exams-during-dasara-holidays) ·
+[Fedena pricing](https://fedena.com/pricing-and-plans).
 
 ## Run it
 

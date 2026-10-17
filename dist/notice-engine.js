@@ -985,7 +985,7 @@ const __parse = (() => {
       return;
     }
     if (joined && days >= 2 && days <= 14) {
-      ev.repeat = days; // ponytail: clashes are checked on the first day only; check each day if multi-day clashes matter
+      ev.repeat = days; // clash.js checks every day of the run
       ev.flags.push({ field: 'date', level: 'info', msg: `Runs every day from ${prettyDate(abs[0].date)} to ${prettyDate(abs[abs.length - 1].date)} (${days} days). The calendar file repeats it.` });
     } else {
       ev.flags.push({ field: 'date', level: 'warn', msg: `This part mentions more than one date (${abs.map((x) => prettyDate(x.date)).join(', ')}). We used the first; check it.` });
@@ -1378,6 +1378,6 @@ root.NoticeEngine = {
   prettyDate: __dates.prettyDate,
   fixOcrText: __ocrfix.fixOcrText,
   normalizeNames: __ocrfix.normalizeNames,
-  version: "6cad2838",
+  version: "381df276",
 };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

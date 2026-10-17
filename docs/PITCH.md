@@ -1,6 +1,6 @@
 # Notice Decoder: demo script and judge questions
 
-For the team presenting at SETU 2026. Every number here comes from `research/` or from running the app.
+For the team presenting at SETU 2026. Every number here comes from the sources listed in the README or from running the app.
 
 ## 2-minute demo (zero-touch version, 2026-10-15)
 
@@ -36,7 +36,7 @@ Notices arrive as long paragraphs, often forwarded late, and students act on the
 Students first. Second, the class representative, who today forwards every notice by hand and is the daily user of the paid plan (see Money).
 
 **How is this different from other tools?**
-We read the code of seven public notice projects from Oct 2026 (`research/06-public-competitors.md`). Most send the notice to Gemini, Gemma or another model and return a summary or a deadline list. None of them exports a calendar file or checks for clashes, and those two are what PS-02 asks for. Two related projects do part of it for other inputs: notice-hub (Chinese QQ groups) gives a calendar subscription without clash checks, and edt-tamis checks university timetable files for exam clashes and exports iCalendar. Neither reads a pasted college notice.
+We read the code of seven public notice projects on GitHub in Oct 2026. Most send the notice to Gemini, Gemma or another model and return a summary or a deadline list. None of them exports a calendar file or checks for clashes, and those two are what PS-02 asks for. Two related projects do part of it for other inputs: notice-hub (Chinese QQ groups) gives a calendar subscription without clash checks, and edt-tamis checks university timetable files for exam clashes and exports iCalendar. Neither reads a pasted college notice.
 
 **Why rules and not AI?**
 - The answer is the same every time, so the student can trust it and we can test it (19 engine tests, plus 20 messy notices written by an outside reviewer: 145 of 152 field checks right).
@@ -80,7 +80,7 @@ Yes, on the device: pdf.js for PDFs with a text layer, Tesseract OCR (the open-s
 | Free | every student | nobody | paste, check, clashes, calendar file, Google Calendar button | about zero: it runs on the phone |
 | Department plan (hosted; the link version is built and free) | the CR or a teacher | the department, signed off by the HOD from the department budget | decode a notice once and publish it; the class subscribes to one calendar link that updates itself, with clash checks across all notices of the term | a small server and storage for the published calendars |
 
-**Price.** Our proposed price is **₹2,999 per department per year**, free for the first term of a pilot. This is our estimate, to be tested in the pilot. For scale: Fedena, a full college ERP, lists $999 to $1,699 a year for the whole college (`research/04`), so one feature for one department has to cost far less.
+**Price.** Our proposed price is **₹2,999 per department per year**, free for the first term of a pilot. This is our estimate, to be tested in the pilot. For scale: Fedena, a full college ERP, lists $999 to $1,699 a year for the whole college (fedena.com/pricing-and-plans), so one feature for one department has to cost far less.
 
 **Why pay when WhatsApp and a shared Google Calendar are free?** The free "Share with class" link already does the typing once for everyone (show it). What it cannot do is change after it is sent: a revised notice means a new link, and nobody's calendar moves. The CR can already forward a notice or type each event into a shared calendar by hand. The paid plan does the typing, catches clashes before they are published, keeps one link that never has to be forwarded again, and moves an event for everyone when a notice is revised.
 
