@@ -29,7 +29,7 @@ Judging: Completeness 35, Monetization 30, Innovation 20, UI/UX 15. The PS text 
 | `app/manifest.webmanifest`, `app/sw.js`, `app/icon-*.png` | PWA: install, offline shell (cache-first, `VERSION` in sw.js), WhatsApp share target (`?text=` -> decode) |
 | `app/pdftext.js`, `app/ocr.js`, `app/engine/ocrfix.js` | PDF text (pdf.js, lines rebuilt by y), photo OCR (tesseract.js, canvas pre-processing), OCR cleanup + same-length typo fixes for month/weekday names; `parseNotice(text, {source:'ocr'})` makes every dated event amber once |
 | `tools/configure.mjs`, `tools/smoke-live.mjs`, `docs/DEPLOY.md` | write GOOGLE_CLIENT_ID / FEED_BASE / APP_URL / KV id into every file + bump sw VERSION; live checks; the owner's four setup steps |
-| `app/gcal.js`, `app/config.js` | Google Calendar one-tap (GIS token flow, `events?iCalUID=` lookup then PATCH or `/import`), `GOOGLE_CLIENT_ID` / `FEED_BASE` |
+| `app/gcal.js`, `app/config.js` | Google Calendar one-tap (GIS token flow, scope `calendar.app.created` so there is no unverified-app screen; events go into a "Notice Decoder" calendar the app creates; `iCalUID=` lookup then PATCH or `/import`), `GOOGLE_CLIENT_ID` / `FEED_BASE` |
 | `worker/` | class feed Worker + KV: create / publish (merge by UID, term-wide clash report) / `GET events` (CR console, Bearer) / cancel / `.ics` (REFRESH-INTERVAL, X-PUBLISHED-TTL) / `.json` / subscribe page; ETag + 304 on the feeds |
 | `integrations/gmail-apps-script/` | `Code.gs` (15-min trigger, upsert by `nd-uid` tag, amber -> email with `#s=` link), `appsscript.json`, `test/run.mjs` (vm + fakes) |
 | `companion/` | Expo Android app: notification listener -> `src/handler.js` -> expo-calendar; parked items reviewed in a WebView of the web app |

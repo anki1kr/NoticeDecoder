@@ -3,7 +3,7 @@
 // `calendarEntries()` is the one place that turns an event into calendar fields (UID, start, end, summary,
 // reminder); the .ics file, the Google Calendar API writer (../gcal.js), the class feed Worker and the
 // Gmail script all read from it, so the four never disagree on a time or a UID.
-import { toMin, fromMin, addDays, fmt12 } from './dates.js';
+import { toMin, fromMin, addDays, fmt12, prettyDate } from './dates.js';
 
 const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 // Reminder per event type: ICS trigger, minutes before, and the text.
@@ -49,12 +49,21 @@ function whenOf(e) {
   return { allDay: false, start: `${e.date}T${fromMin(from)}:00`, end: `${e.date}T${fromMin(to)}:00` };
 }
 
+const TYPE_EMOJI = { test: '📝', deadline: '⏰', lecture: '🎓', other: '📌' };
+
 function descriptionOf(e) {
+  const when = !e.start ? 'All day' : e.type === 'deadline' ? `By ${fmt12(e.start)}` : e.end ? `${fmt12(e.start)} to ${fmt12(e.end)}` : fmt12(e.start);
+  const rem = e.start ? (REMINDER[e.type] || REMINDER.other).text : '';
   return [
-    `Type: ${e.typeLabel || e.type}`,
-    e.durationMin ? (e.window ? `Open ${fmt12(e.start)} to ${fmt12(e.end)}; takes ${e.durationMin} minutes once you start` : `Takes ${e.durationMin} minutes`) : '',
-    e.reportAt ? `Report by ${fmt12(e.reportAt)}` : '',
-    e.link ? `Link: ${e.link}` : '',
+    `${TYPE_EMOJI[e.type] || TYPE_EMOJI.other} ${e.typeLabel || e.type}`,
+    `📅 ${prettyDate(e.date)}`,
+    `🕒 ${when}`,
+    e.venue ? `📍 ${e.venue}` : '',
+    e.durationMin ? (e.window ? `⏳ Open ${fmt12(e.start)} to ${fmt12(e.end)}; takes ${e.durationMin} minutes once you start` : `⏳ Takes ${e.durationMin} minutes`) : '',
+    e.reportAt ? `🚪 Report by ${fmt12(e.reportAt)}` : '',
+    e.link ? `🔗 ${e.link}` : '',
+    rem ? `🔔 ${rem}` : '',
+    '',
     'Added with Notice Decoder. Check the original notice for changes.',
   ].filter(Boolean).join('\n');
 }

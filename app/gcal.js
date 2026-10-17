@@ -1,13 +1,19 @@
-// Google Calendar, one tap: writes the reviewed events straight into the signed-in user's primary calendar.
+// Google Calendar, one tap: writes the reviewed events into a "Notice Decoder" calendar the app creates in the signed-in
+// user's account. The scope is calendar.app.created (non-sensitive: the app can only touch calendars it made itself), so
+// Google shows no "this app is not verified" screen and the app can never read or change the user's other events.
 // Same UIDs and times as the .ics file (calendarEntries in engine/ics.js), so adding twice updates instead of
 // duplicating, and a revised notice moves the event. The token lives in memory (and sessionStorage for the hour it
 // is valid, so the auto-add path can run without a click); nothing else is stored anywhere.
 import { calendarEntries, TZ } from './engine/ics.js';
 import { GOOGLE_CLIENT_ID } from './config.js';
 
-const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-const API = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
+const CAL_API = 'https://www.googleapis.com/calendar/v3/calendars';
 const TOKEN_KEY = 'nd-gcal-token';
+const CAL_KEY = 'nd-gcal-calendar';
+const CAL_NAME = 'Notice Decoder';
+// Google event colours by type (colorId): test red, deadline orange, lecture blue, other grey.
+const COLOR = { test: '11', deadline: '6', lecture: '9', other: '8' };
 
 // `window.__ndGcalDeps = { token, fetch }` lets the browser check (tools/ui-check.mjs) and other hosts bypass Google sign-in.
 export const configured = () => Boolean(GOOGLE_CLIENT_ID || window.__ndGcalDeps?.token);
@@ -72,6 +78,7 @@ export function toGoogleEvent(entry, { reminders = true } = {}) {
     description: entry.description,
     start: entry.allDay ? { date: entry.start } : { dateTime: entry.start, timeZone: TZ },
     end: entry.allDay ? { date: entry.end } : { dateTime: entry.end, timeZone: TZ },
+    colorId: COLOR[entry.type] || COLOR.other,
     reminders: reminders && entry.reminder ? { useDefault: false, overrides: [{ method: 'popup', minutes: entry.reminder.minutes }] } : { useDefault: true },
     extendedProperties: { private: { noticeDecoder: '1', type: entry.type } },
   };
@@ -82,8 +89,8 @@ export function toGoogleEvent(entry, { reminders = true } = {}) {
   return body;
 }
 
-async function call(method, path, accessToken, body, fetchFn) {
-  const res = await fetchFn(`${API}${path}`, {
+async function call(method, url, accessToken, body, fetchFn) {
+  const res = await fetchFn(url, {
     method,
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
@@ -98,6 +105,20 @@ async function call(method, path, accessToken, body, fetchFn) {
   return data;
 }
 
+const savedCalendar = () => { try { return localStorage.getItem(CAL_KEY); } catch { return null; } };
+const saveCalendar = (id) => { try { localStorage.setItem(CAL_KEY, id); } catch { /* private mode */ } };
+
+// The id of the "Notice Decoder" calendar: the saved one if it still exists, else a new one.
+async function calendarId(accessToken, fetchFn) {
+  const saved = savedCalendar();
+  if (saved) {
+    try { await call('GET', `${CAL_API}/${encodeURIComponent(saved)}`, accessToken, null, fetchFn); return saved; } catch (err) { if (err.status === 401) throw err; /* deleted or not ours: make a new one */ }
+  }
+  const made = await call('POST', CAL_API, accessToken, { summary: CAL_NAME, description: 'Events decoded from college notices by Notice Decoder.', timeZone: TZ }, fetchFn);
+  saveCalendar(made.id);
+  return made.id;
+}
+
 // Adds every dated event. An event whose UID already exists in the calendar is updated, not duplicated.
 // Returns { added: [{id, uid, summary}], updated: [...], failed: [{uid, error}] }.
 // `deps` lets tests and other hosts swap the token and fetch.
@@ -105,17 +126,22 @@ export async function addAll(events, { reminders = true, silent = false } = {}, 
   const fetchFn = deps.fetch || ((...a) => fetch(...a));
   const accessToken = deps.token || await getToken({ silent });
   if (!accessToken) return null; // silent and not signed in
-  const out = { added: [], updated: [], failed: [] };
+  const out = { added: [], updated: [], failed: [], calendar: CAL_NAME };
+  let api;
+  try { api = `${CAL_API}/${encodeURIComponent(await calendarId(accessToken, fetchFn))}/events`; } catch (err) {
+    if (err.status === 401) { signOut(); throw new Error('Google sign-in expired. Tap again to sign in.'); }
+    throw err;
+  }
   for (const entry of calendarEntries(events)) {
     const body = toGoogleEvent(entry, { reminders });
     try {
-      const found = await call('GET', `?iCalUID=${encodeURIComponent(entry.uid)}&showDeleted=false&maxResults=1`, accessToken, null, fetchFn);
+      const found = await call('GET', `${api}?iCalUID=${encodeURIComponent(entry.uid)}&showDeleted=false&maxResults=1`, accessToken, null, fetchFn);
       const existing = found?.items?.[0];
       if (existing) {
-        const res = await call('PATCH', `/${encodeURIComponent(existing.id)}`, accessToken, body, fetchFn);
+        const res = await call('PATCH', `${api}/${encodeURIComponent(existing.id)}`, accessToken, body, fetchFn);
         out.updated.push({ id: res.id, uid: entry.uid, summary: entry.summary, link: res.htmlLink });
       } else {
-        const res = await call('POST', '/import', accessToken, body, fetchFn);
+        const res = await call('POST', `${api}/import`, accessToken, body, fetchFn);
         out.added.push({ id: res.id, uid: entry.uid, summary: entry.summary, link: res.htmlLink });
       }
     } catch (err) {
@@ -131,9 +157,12 @@ export async function removeAll(added, deps = {}) {
   const fetchFn = deps.fetch || ((...a) => fetch(...a));
   const accessToken = deps.token || await getToken({ silent: true });
   if (!accessToken) throw new Error('Not signed in.');
+  const cal = savedCalendar();
+  if (!cal) throw new Error('No Notice Decoder calendar to remove from.');
+  const api = `${CAL_API}/${encodeURIComponent(cal)}/events`;
   let n = 0;
   for (const { id } of added) {
-    try { await call('DELETE', `/${encodeURIComponent(id)}`, accessToken, null, fetchFn); n++; } catch { /* already gone */ }
+    try { await call('DELETE', `${api}/${encodeURIComponent(id)}`, accessToken, null, fetchFn); n++; } catch { /* already gone */ }
   }
   return n;
 }

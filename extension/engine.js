@@ -1146,7 +1146,7 @@ const __clash = (() => {
 
 // ---- ics.js ----
 const __ics = (() => {
-  const { toMin, fromMin, addDays, fmt12 } = __dates;
+  const { toMin, fromMin, addDays, fmt12, prettyDate } = __dates;
   // RFC 5545 calendar file: CRLF line endings, lines folded at 75 octets, escaped text,
   // times in Asia/Kolkata with a VTIMEZONE so Google, Outlook and Apple read the same clock time.
   // `calendarEntries()` is the one place that turns an event into calendar fields (UID, start, end, summary,
@@ -1197,12 +1197,21 @@ const __ics = (() => {
     return { allDay: false, start: `${e.date}T${fromMin(from)}:00`, end: `${e.date}T${fromMin(to)}:00` };
   }
 
+  const TYPE_EMOJI = { test: '📝', deadline: '⏰', lecture: '🎓', other: '📌' };
+
   function descriptionOf(e) {
+    const when = !e.start ? 'All day' : e.type === 'deadline' ? `By ${fmt12(e.start)}` : e.end ? `${fmt12(e.start)} to ${fmt12(e.end)}` : fmt12(e.start);
+    const rem = e.start ? (REMINDER[e.type] || REMINDER.other).text : '';
     return [
-      `Type: ${e.typeLabel || e.type}`,
-      e.durationMin ? (e.window ? `Open ${fmt12(e.start)} to ${fmt12(e.end)}; takes ${e.durationMin} minutes once you start` : `Takes ${e.durationMin} minutes`) : '',
-      e.reportAt ? `Report by ${fmt12(e.reportAt)}` : '',
-      e.link ? `Link: ${e.link}` : '',
+      `${TYPE_EMOJI[e.type] || TYPE_EMOJI.other} ${e.typeLabel || e.type}`,
+      `📅 ${prettyDate(e.date)}`,
+      `🕒 ${when}`,
+      e.venue ? `📍 ${e.venue}` : '',
+      e.durationMin ? (e.window ? `⏳ Open ${fmt12(e.start)} to ${fmt12(e.end)}; takes ${e.durationMin} minutes once you start` : `⏳ Takes ${e.durationMin} minutes`) : '',
+      e.reportAt ? `🚪 Report by ${fmt12(e.reportAt)}` : '',
+      e.link ? `🔗 ${e.link}` : '',
+      rem ? `🔔 ${rem}` : '',
+      '',
       'Added with Notice Decoder. Check the original notice for changes.',
     ].filter(Boolean).join('\n');
   }
@@ -1287,6 +1296,6 @@ root.NoticeEngine = {
   prettyDate: __dates.prettyDate,
   fixOcrText: __ocrfix.fixOcrText,
   normalizeNames: __ocrfix.normalizeNames,
-  version: "46cac305",
+  version: "ba35721",
 };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
