@@ -13,4 +13,4 @@ APP_URL = "https://anki1kr.me/NoticeDecoder/app/"
 
 [[kv_namespaces]]
 binding = "CLASSES"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "224af06f95da4ba094846d28e1c5dea3"

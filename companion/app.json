@@ -25,15 +25,35 @@
     "icon": "./assets/icon.png",
     "plugins": [
       "expo-dev-client",
-      ["expo-calendar", { "calendarPermission": "Notice Decoder writes the events it finds in your class notices into a calendar you choose." }],
-      ["expo-notifications", { "icon": "./assets/icon.png", "color": "#3d2c8d" }],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Notice Decoder writes the events it finds in your class notices into a calendar you choose."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#3d2c8d"
+        }
+      ],
       "expo-background-task",
-      ["expo-share-intent", { "androidIntentFilters": ["text/*", "image/*", "application/pdf"] }],
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": [
+            "text/*",
+            "image/*",
+            "application/pdf"
+          ]
+        }
+      ],
       "./plugins/withNotificationListener.js"
     ],
     "extra": {
       "appUrl": "https://anki1kr.me/NoticeDecoder/app/",
-      "feedBase": ""
+      "feedBase": "https://notice-decoder-feed.ankit25679.workers.dev"
     }
   }
 }

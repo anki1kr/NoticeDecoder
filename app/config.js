@@ -10,4 +10,4 @@
 export const GOOGLE_CLIENT_ID = '1048623925742-fu9isnfo2ueuj3o77jgp9sej4ou2upub.apps.googleusercontent.com';
 
 // Class feed (Phase 2): the Worker that serves webcal feeds. Empty = feature hidden.
-export const FEED_BASE = '';
+export const FEED_BASE = 'https://notice-decoder-feed.ankit25679.workers.dev';
