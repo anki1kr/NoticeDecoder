@@ -11,7 +11,7 @@ import { fixOcrText } from './engine/ocrfix.js';
 
 const AUTO_ADD_KEY = 'nd-auto-add';
 const CLASS_KEY = 'nd-class'; // { id, secret, name, feed, page } for the class representative
-const feedBase = () => (FEED_BASE || window.__ndFeedBase || '').replace(/\/+$/, '');
+const feedBase = () => (window.__ndFeedBase || FEED_BASE || '').replace(/\/+$/, '');
 const DECODE_DEBOUNCE_MS = 900;
 
 const TYPE_LABELS = { test: 'Test', deadline: 'Deadline', lecture: 'Lecture', other: 'Other' };
