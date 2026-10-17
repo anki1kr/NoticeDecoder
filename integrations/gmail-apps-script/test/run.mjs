@@ -92,7 +92,7 @@ test('clean notice (PS-02 sample): 3 events created, tagged with UIDs, reminders
   assert.equal(calEvents.length, 3);
   const t = calEvents.find((e) => e.tags['nd-uid'] === 'internal-test-2@notice-decoder');
   assert.deepEqual([t.start.getHours(), t.start.getMinutes(), t.end.getHours(), t.end.getMinutes(), t.location, t.reminders], [10, 0, 11, 30, 'Room 204', [1440]]);
-  const d = calEvents.find((e) => /^Deadline:/.test(e.title));
+  const d = calEvents.find((e) => /Deadline:/.test(e.title));
   assert.deepEqual([d.start.getHours(), d.start.getMinutes(), d.end.getHours(), d.reminders], [11, 30, 12, [180]]);
   assert.ok(inbox[0].labels.has('nd-done') && !inbox[0].labels.has('nd-check'));
   assert.equal(sent.length, 0);

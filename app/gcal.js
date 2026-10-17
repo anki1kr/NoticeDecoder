@@ -12,8 +12,6 @@ const CAL_API = 'https://www.googleapis.com/calendar/v3/calendars';
 const TOKEN_KEY = 'nd-gcal-token';
 const CAL_KEY = 'nd-gcal-calendar';
 const CAL_NAME = 'Notice Decoder';
-// Google event colours by type (colorId): test red, deadline orange, lecture blue, other grey.
-const COLOR = { test: '11', deadline: '6', lecture: '9', other: '8' };
 
 // `window.__ndGcalDeps = { token, fetch }` lets the browser check (tools/ui-check.mjs) and other hosts bypass Google sign-in.
 export const configured = () => Boolean(GOOGLE_CLIENT_ID || window.__ndGcalDeps?.token);
@@ -78,7 +76,7 @@ export function toGoogleEvent(entry, { reminders = true } = {}) {
     description: entry.description,
     start: entry.allDay ? { date: entry.start } : { dateTime: entry.start, timeZone: TZ },
     end: entry.allDay ? { date: entry.end } : { dateTime: entry.end, timeZone: TZ },
-    colorId: COLOR[entry.type] || COLOR.other,
+    colorId: entry.colorId,
     reminders: reminders && entry.reminder ? { useDefault: false, overrides: [{ method: 'popup', minutes: entry.reminder.minutes }] } : { useDefault: true },
     extendedProperties: { private: { noticeDecoder: '1', type: entry.type } },
   };

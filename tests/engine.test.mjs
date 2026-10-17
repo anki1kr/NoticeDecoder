@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseNotice } from '../app/engine/parse.js';
 import { findClashes } from '../app/engine/clash.js';
-import { toICS, gcalUrl } from '../app/engine/ics.js';
+import { toICS, gcalUrl, calendarEntries } from '../app/engine/ics.js';
 import { fixOcrText, normalizeNames } from '../app/engine/ocrfix.js';
 
 const pastedAt = new Date(2026, 9, 14, 10, 0); // 14 Oct 2026, local time
@@ -94,7 +94,7 @@ test('.ics is valid RFC 5545 shape', () => {
   assert.match(ics, /DTEND;TZID=Asia\/Kolkata:20261113T120000/); // deadline block ends at 12:00
   assert.ok(ics.split('\r\n').every((l) => new TextEncoder().encode(l).length <= 75));
   assert.ok(!/\r?\n(?<!\r\n)/.test(ics.replace(/\r\n/g, '')), 'only CRLF line breaks');
-  assert.match(ics, /SUMMARY:Guest lecture: AI in Healthcare/);
+  assert.match(ics, /SUMMARY:🔴 🎓 Guest lecture: AI in Healthcare/);
 });
 
 test('Google Calendar link: same times as the .ics, deadline as the 30 min before it', () => {
@@ -102,7 +102,7 @@ test('Google Calendar link: same times as the .ics, deadline as the 30 min befor
   const q = (e) => new URL(gcalUrl(e)).searchParams;
   assert.equal(q(pick(r, 'Internal Test 2')).get('dates'), '20261113T100000/20261113T113000');
   assert.equal(q(pick(r, 'Lab record')).get('dates'), '20261113T113000/20261113T120000');
-  assert.equal(q(pick(r, 'Lab record')).get('text'), 'Deadline: Lab record submission (by 12:00 PM)');
+  assert.equal(q(pick(r, 'Lab record')).get('text'), '⏰ Deadline: Lab record submission (by 12:00 PM)');
   assert.equal(q(pick(r, 'Internal Test 2')).get('ctz'), 'Asia/Kolkata');
   assert.equal(gcalUrl({ ...pick(r, 'Internal Test 2'), date: null }), null);
 });
@@ -252,7 +252,7 @@ test('"Today" is the notice date only beside a Date: line; a report-by line is n
   assert.deepEqual([ev.length, ev[0].start, ev[0].reportAt], [1, '10:00', '08:30']);
   const broken = [{ id: 'a', title: 'A', type: 'test', date: '2026-11-13', start: '10:00', end: '09:00', flags: [] }, { id: 'b', title: 'B', type: 'lecture', date: '2026-11-13', start: '10:30', end: '11:30', flags: [] }];
   assert.equal(findClashes(broken)[0].kind, 'overlap'); // A runs 10:00-11:00 by the 1 h rule, same as the timeline
-  assert.match(toICS([{ id: 'm', title: '', type: 'other', date: '2026-11-13', start: '10:00', flags: [] }]), /SUMMARY:Event/);
+  assert.match(toICS([{ id: 'm', title: '', type: 'other', date: '2026-11-13', start: '10:00', flags: [] }]), /SUMMARY:📌 Event/);
 });
 
 
@@ -303,6 +303,26 @@ test('Campus venue codes: LT-3, CR 2, Lab-II, Block A-204, Seminar Hall 1', () =
   assert.equal(v('Practical on 13 Nov 2026 at 2 PM in Lab-II.'), 'Lab-II');
   assert.equal(v('Meeting on 13 Nov 2026 at 2 PM in Block A-204.'), 'Block A-204');
   assert.equal(v('Seminar on 13 Nov 2026 at 2 PM in Seminar Hall 1.'), 'Seminar Hall 1');
+});
+
+test('Calendar colour and emoji: clash red, tight orange, otherwise by type; emoji by task', () => {
+  const ev = (id, title, type, start, end, date = '2026-11-13') => ({ id, title, type, typeLabel: title, date, start, end, flags: [] });
+  const [a, b, c, d, e] = calendarEntries([
+    ev('1', 'Maths Exam', 'test', '10:00', '12:00'),
+    ev('2', 'Guest lecture', 'lecture', '11:00', '12:30'),
+    ev('3', 'Lab viva', 'test', '12:40', '13:30'),
+    ev('4', 'Placement drive', 'other', '16:00', '17:00', '2026-11-14'),
+    ev('5', 'Lab record submission', 'deadline', '23:00', null, '2026-11-15'),
+  ]);
+  assert.deepEqual([a.status, a.colorId], ['clash', '11']);
+  assert.ok(a.summary.startsWith('🔴 📝'));
+  assert.equal(b.status, 'clash');
+  assert.deepEqual([c.status, c.colorId], ['tight', '6']); // 10 minutes after the lecture ends: tight, not a clash
+  assert.ok(c.summary.startsWith('🟠 📝'));
+  assert.deepEqual([d.status, d.colorId], ['ok', '2']);
+  assert.ok(d.summary.startsWith('💼 '));
+  assert.equal(e.status, 'ok');
+  assert.ok(e.summary.startsWith('⏰ Deadline:'));
 });
 
 console.log(`\n${passed} passed`);

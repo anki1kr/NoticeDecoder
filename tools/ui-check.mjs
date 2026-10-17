@@ -104,9 +104,9 @@ ok(mk.length === 1 && mk[0].body.summary === 'Notice Decoder' && imports.every((
 ok(glog.filter((r) => r.method === 'GET' && /iCalUID=/.test(r.url)).length === 3 && imports.length === 3, 'gcal: 3 lookups by iCalUID + 3 imports');
 const test2 = imports.find((r) => r.body.iCalUID === 'internal-test-2@notice-decoder');
 const dl = imports.find((r) => /lab-record/.test(r.body.iCalUID));
-ok(test2 && test2.body.colorId === '11' && test2.body.reminders.overrides[0].minutes === 1440 && /📅/.test(test2.body.description), 'gcal: test is red, has a 1-day reminder and a formatted description', JSON.stringify(test2?.body));
+ok(test2 && ['11', '6'].includes(test2.body.colorId) && /^(🔴|🟠) 📝/.test(test2.body.summary) && test2.body.reminders.overrides[0].minutes === 1440 && /📅/.test(test2.body.description), 'gcal: test is flagged red or orange for its neighbours, has a 1-day reminder and a formatted description', JSON.stringify(test2?.body));
 ok(test2 && test2.body.start.dateTime === '2026-11-13T10:00:00' && test2.body.start.timeZone === 'Asia/Kolkata' && test2.body.end.dateTime === '2026-11-13T11:30:00', 'gcal: test times match the .ics', JSON.stringify(test2?.body));
-ok(dl && dl.body.start.dateTime === '2026-11-13T11:30:00' && dl.body.end.dateTime === '2026-11-13T12:00:00' && /^Deadline:/.test(dl.body.summary) && dl.body.reminders.overrides[0].minutes === 180, 'gcal: deadline is the 30 min before, 3 h reminder', JSON.stringify(dl?.body));
+ok(dl && dl.body.start.dateTime === '2026-11-13T11:30:00' && dl.body.end.dateTime === '2026-11-13T12:00:00' && /Deadline:/.test(dl.body.summary) && dl.body.reminders.overrides[0].minutes === 180, 'gcal: deadline is the 30 min before, 3 h reminder', JSON.stringify(dl?.body));
 await page.locator('#export-status').getByRole('button', { name: 'Undo' }).click();
 await page.waitForFunction(() => /Removed 3/.test(document.querySelector('#export-status').innerText), null, { timeout: 5000 }).catch(() => {});
 ok((await page.evaluate(() => window.__ndGcalLog)).filter((r) => r.method === 'DELETE').length === 3, 'gcal: Undo deleted the 3 events');

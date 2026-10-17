@@ -4,6 +4,7 @@
 // reminder); the .ics file, the Google Calendar API writer (../gcal.js), the class feed Worker and the
 // Gmail script all read from it, so the four never disagree on a time or a UID.
 import { toMin, fromMin, addDays, fmt12, prettyDate } from './dates.js';
+import { findClashes } from './clash.js';
 
 const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 // Reminder per event type: ICS trigger, minutes before, and the text.
@@ -49,13 +50,77 @@ function whenOf(e) {
   return { allDay: false, start: `${e.date}T${fromMin(from)}:00`, end: `${e.date}T${fromMin(to)}:00` };
 }
 
-const TYPE_EMOJI = { test: '📝', deadline: '⏰', lecture: '🎓', other: '📌' };
+// Emoji by task: the title words decide first (a "Lab record submission" is a deadline, a "Lab viva" is a test), then the type.
+const EMOJI_BY_WORD = [
+  [/\b(exam|test|quiz|viva|mid-?sem|end-?sem|assessment|ct\d?)\b/i, '📝'],
+  [/\b(submission|submit|deadline|due|assignment|record|report|registration|fees?)\b/i, '⏰'],
+  [/\b(placement|drive|interview|gd|recruit|internship|hiring)\b/i, '💼'],
+  [/\b(lab|practical|workshop)\b/i, '🔬'],
+  [/\b(lecture|class|seminar|webinar|talk|session|guest)\b/i, '🎓'],
+  [/\b(fest|cultural|competition|hackathon|contest|sports|match)\b/i, '🏆'],
+  [/\b(holiday|vacation)\b/i, '🏖️'],
+  [/\b(meeting|orientation)\b/i, '👥'],
+];
+const EMOJI_BY_TYPE = { test: '📝', deadline: '⏰', lecture: '🎓', other: '📌' };
+export const emojiOf = (e) => (EMOJI_BY_WORD.find(([re]) => re.test(e.title || ''))?.[1]) || EMOJI_BY_TYPE[e.type] || EMOJI_BY_TYPE.other;
 
-function descriptionOf(e) {
+// Google Calendar colour ids: clash red (Tomato), tight orange (Tangerine), else by type.
+const COLOR_BY_TYPE = { test: '3', deadline: '5', lecture: '9', other: '2' };
+const STATUS_COLOR = { clash: '11', tight: '6' };
+const STATUS_MARK = { clash: '🔴 ', tight: '🟠 ' };
+const TIGHT_GAP_MIN = 30;
+const BUSY_DAY = 4;
+
+// Minutes an event occupies on its day: a deadline is a point, otherwise start to end (or duration, or 1 hour).
+function minutesOf(e) {
+  const s = toMin(e.start);
+  if (e.type === 'deadline' || e.point) return [s, s];
+  return [s, e.end && toMin(e.end) > s ? toMin(e.end) : s + (e.durationMin || 60)];
+}
+
+// Per event: 'clash' (overlaps another, or a deadline falls inside one), 'tight' (less than 30 minutes from the
+// neighbouring event, or a day with 4+ timed events) or 'ok'. `with` names the events it conflicts with or crowds.
+function statusMap(events) {
+  const out = new Map(events.map((e) => [e.id, { status: 'ok', with: [] }]));
+  const title = new Map(events.map((e) => [e.id, titleOf(e)]));
+  const mark = (id, status, other) => {
+    const cur = out.get(id);
+    if (!cur) return;
+    if (status === 'clash') cur.status = 'clash';
+    else if (cur.status === 'ok') cur.status = 'tight';
+    if (other && !cur.with.includes(other)) cur.with.push(other);
+  };
+  for (const row of findClashes(events)) {
+    if (row.kind === 'none') continue;
+    mark(row.a, 'clash', title.get(row.b));
+    mark(row.b, 'clash', title.get(row.a));
+  }
+  const days = new Map();
+  for (const e of events) if (e.date && e.start) days.set(e.date, [...(days.get(e.date) || []), e]);
+  for (const list of days.values()) {
+    const sorted = [...list].sort((a, b) => toMin(a.start) - toMin(b.start));
+    for (let i = 0; i + 1 < sorted.length; i++) {
+      const [, endA] = minutesOf(sorted[i]);
+      const [startB] = minutesOf(sorted[i + 1]);
+      const gap = startB - endA;
+      if (gap >= 0 && gap < TIGHT_GAP_MIN) {
+        mark(sorted[i].id, 'tight', title.get(sorted[i + 1].id));
+        mark(sorted[i + 1].id, 'tight', title.get(sorted[i].id));
+      }
+    }
+    if (sorted.length >= BUSY_DAY) for (const e of sorted) mark(e.id, 'tight', null);
+  }
+  return out;
+}
+
+const statusLine = (st) => (st.status === 'clash' ? `🔴 Clashes with ${st.with.join(' and ')}` : st.status === 'tight' ? (st.with.length ? `🟠 Tight: right next to ${st.with.join(' and ')}` : '🟠 Busy day: 4 or more events') : '');
+
+function descriptionOf(e, st) {
   const when = !e.start ? 'All day' : e.type === 'deadline' ? `By ${fmt12(e.start)}` : e.end ? `${fmt12(e.start)} to ${fmt12(e.end)}` : fmt12(e.start);
   const rem = e.start ? (REMINDER[e.type] || REMINDER.other).text : '';
   return [
-    `${TYPE_EMOJI[e.type] || TYPE_EMOJI.other} ${e.typeLabel || e.type}`,
+    `${emojiOf(e)} ${e.typeLabel || e.type}`,
+    statusLine(st),
     `📅 ${prettyDate(e.date)}`,
     `🕒 ${when}`,
     e.venue ? `📍 ${e.venue}` : '',
@@ -72,17 +137,21 @@ function descriptionOf(e) {
 // so a revised notice imported later updates the event instead of adding a copy.
 export function calendarEntries(events) {
   const used = new Map();
+  const status = statusMap(events);
   return events.filter((x) => x.date).map((e) => {
+    const st = status.get(e.id) || { status: 'ok', with: [] };
     const base = slug(titleOf(e));
     const n = (used.get(base) || 0) + 1;
     used.set(base, n);
     const { allDay, start, end } = whenOf(e);
     return {
       uid: `${base}${n > 1 ? '-' + n : ''}@notice-decoder`,
-      summary: summaryOf(e),
+      summary: `${STATUS_MARK[st.status] || ''}${emojiOf(e)} ${summaryOf(e)}`,
+      status: st.status,
+      colorId: STATUS_COLOR[st.status] || COLOR_BY_TYPE[e.type] || COLOR_BY_TYPE.other,
       allDay, start, end,
       location: e.venue || null,
-      description: descriptionOf(e),
+      description: descriptionOf(e, st),
       category: (e.typeLabel || e.type).toUpperCase(),
       url: e.link || null,
       recurrence: e.repeat > 1 ? `RRULE:FREQ=DAILY;COUNT=${e.repeat}` : null,
