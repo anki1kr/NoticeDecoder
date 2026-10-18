@@ -338,4 +338,19 @@ test('Real notice 09 (IKTARA placement drive): one deadline, a title with the su
   assert.equal(entry.summary, '⏰ Registration deadline: IKTARA Data Sciences Placement Drive (by 10:00 AM)');
 });
 
+test('Copy-paste noise: a day that does not exist, invisible characters, WhatsApp message prefixes', () => {
+  const at = { pastedAt: new Date(2026, 10, 1, 10) };
+  const feb = parseNotice('Exam on 31 Feb 2026 at 10 AM', at).events[0];
+  assert.equal(feb.date, null); // asks for a date instead of exporting 2026-02-31
+  const zw = parseNotice('Exam on 1​3 Nov 2026 at 1​0 AM', at);
+  assert.deepEqual([zw.events[0].date, zw.events[0].start], ['2026-11-13', '10:00']);
+  assert.equal(zw.text, 'Exam on 13 Nov 2026 at 10 AM');
+  const wa = parseNotice('[05/10/26, 9:14 AM] Rahul: bhai notes bhej\n[05/10/26, 9:20 AM] CR: Internal test on 13 Nov 2026 at 10 AM, Room 204', at);
+  assert.equal(wa.events.length, 1);
+  assert.deepEqual([wa.events[0].date, wa.events[0].start], ['2026-11-13', '10:00']);
+  assert.equal(parseNotice('05/10/2026, 21:14 - Rahul: kal milte hain\n05/10/2026, 21:15 - Priya: theek hai', at).events.length, 0);
+  // a notice line that merely starts with a date is not a WhatsApp prefix
+  assert.equal(parseNotice('05/11/2026: Internal test at 10 AM in Room 204', at).events[0].date, '2026-11-05');
+});
+
 console.log(`\n${passed} passed`);

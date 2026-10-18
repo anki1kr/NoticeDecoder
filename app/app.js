@@ -216,7 +216,7 @@ function decode(text, { auto = false, source = 'text' } = {}) {
     showInputError(PARSE_ERROR_MSG);
     return;
   }
-  state.decodedText = text;
+  state.decodedText = result.text ?? text; // the cleaned text: highlights point into it
   state.source = source;
   state.result = result;
   state.events = (result.events || []).map((raw, i) => workingCopy(raw, i));

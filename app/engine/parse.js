@@ -260,10 +260,18 @@ function tableRow(u, ud, ut) {
   return null;
 }
 
+// Copy-paste noise that would change the reading: invisible characters ("1​3 Nov" read as 3 Nov) and the
+// "[05/10/26, 9:14 AM] Rahul: " prefix WhatsApp puts on copied messages (its time became an event of its own).
+const INVISIBLE = /[\u0000­​-‏‪-‮⁠-⁤﻿]/g;
+const WA_PREFIX = /^(?:\[\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},? \d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s?[ap]\.?m\.?)?\]|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}, \d{1,2}[:.]\d{2}(?:\s?[ap]\.?m\.?)? -) ?[^:\n]{1,40}: /gim;
+export const cleanNotice = (text) => text.replace(INVISIBLE, '').replace(WA_PREFIX, '');
+
 // `source`: 'ocr' or 'pdf-scan' when the text came out of a photo. Every dated event then carries one amber flag,
 // because OCR errors are silent (a 3 read as 8): the student confirms each event once before anything is exported.
+// result.text is the cleaned notice that every source offset points into.
 export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {}) {
-  const result = { anchorDate: null, events: [], pending: [], notes: [], warnings: [] };
+  if (typeof text === 'string') text = cleanNotice(text);
+  const result = { anchorDate: null, events: [], pending: [], notes: [], warnings: [], text };
   if (typeof text !== 'string' || !text.trim()) {
     result.warnings.push({ level: 'error', msg: 'Paste a notice first. It needs at least one sentence with a date or a time, for example "Test on 13 Nov at 10 AM".' });
     return result;

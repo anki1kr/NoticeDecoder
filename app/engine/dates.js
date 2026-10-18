@@ -61,7 +61,8 @@ export function findDates(text) {
     const fix = normalized.fixes.find((f) => f.s < tok.e && f.e > tok.s);
     if (fix) tok.nameFix = fix;
   }
-  return out;
+  // "31 Feb" is not a day: drop it, so the event asks for a date instead of exporting one that does not exist.
+  return out.filter((t) => t.kind !== 'abs' || validDate(t.y ?? 2024, t.m, t.d));
 }
 
 function findDatesIn(text) {

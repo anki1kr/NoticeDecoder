@@ -169,7 +169,8 @@ const __dates = (() => {
       const fix = normalized.fixes.find((f) => f.s < tok.e && f.e > tok.s);
       if (fix) tok.nameFix = fix;
     }
-    return out;
+    // "31 Feb" is not a day: drop it, so the event asks for a date instead of exporting one that does not exist.
+    return out.filter((t) => t.kind !== 'abs' || validDate(t.y ?? 2024, t.m, t.d));
   }
 
   function findDatesIn(text) {
@@ -672,10 +673,18 @@ const __parse = (() => {
     return null;
   }
 
+  // Copy-paste noise that would change the reading: invisible characters ("1​3 Nov" read as 3 Nov) and the
+  // "[05/10/26, 9:14 AM] Rahul: " prefix WhatsApp puts on copied messages (its time became an event of its own).
+  const INVISIBLE = /[\u0000­​-‏‪-‮⁠-⁤﻿]/g;
+  const WA_PREFIX = /^(?:\[\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},? \d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s?[ap]\.?m\.?)?\]|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}, \d{1,2}[:.]\d{2}(?:\s?[ap]\.?m\.?)? -) ?[^:\n]{1,40}: /gim;
+  const cleanNotice = (text) => text.replace(INVISIBLE, '').replace(WA_PREFIX, '');
+
   // `source`: 'ocr' or 'pdf-scan' when the text came out of a photo. Every dated event then carries one amber flag,
   // because OCR errors are silent (a 3 read as 8): the student confirms each event once before anything is exported.
+  // result.text is the cleaned notice that every source offset points into.
   function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {}) {
-    const result = { anchorDate: null, events: [], pending: [], notes: [], warnings: [] };
+    if (typeof text === 'string') text = cleanNotice(text);
+    const result = { anchorDate: null, events: [], pending: [], notes: [], warnings: [], text };
     if (typeof text !== 'string' || !text.trim()) {
       result.warnings.push({ level: 'error', msg: 'Paste a notice first. It needs at least one sentence with a date or a time, for example "Test on 13 Nov at 10 AM".' });
       return result;
@@ -1043,7 +1052,7 @@ const __parse = (() => {
     }
   }
 
-  return { parseNotice };
+  return { cleanNotice, parseNotice };
 })();
 
 // ---- clash.js ----
@@ -1378,6 +1387,6 @@ root.NoticeEngine = {
   prettyDate: __dates.prettyDate,
   fixOcrText: __ocrfix.fixOcrText,
   normalizeNames: __ocrfix.normalizeNames,
-  version: "381df276",
+  version: "a92ac306",
 };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

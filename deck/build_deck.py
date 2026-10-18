@@ -290,7 +290,7 @@ def frame(slide, title):
         if sh.name.startswith('Oval'):
             r = set_text(sh, 'Nova Nexus'); r.font.bold = True; r.font.size = Pt(15)
         elif sh.name.startswith('Footer'):
-            set_text(sh, '@SETU 2026  PS-02 Idea Submission')
+            set_text(sh, '@SETU 2026  PS-02 Prototype Submission')
         elif sh.name.startswith('Title'):
             r = set_text(sh, title)
             size = (r.font.size.pt if r.font.size else 36)
@@ -350,11 +350,11 @@ text(s, 6.73, 1.78, 6.15, 0.7, 'Paste a notice. The app finds each event, shows 
 sh_h = shot(s, SHOTS / 'shot-solution.png', 0.95, 2.6, 6.6,
             pins=[(1, (PART_Y[0] + 51) / comp.height), (2, (PART_Y[1] + 330) / comp.height), (3, (PART_Y[2] + 190) / comp.height)])
 text(s, 0.55, 2.7 + sh_h, 7.0, 0.4, '**1** The answer first     **2** Each date shows the words it came from     **3** One line per event', 13)
-band(s, 7.85, 2.6, 5.03, 'Why it is different')
-text(s, 7.85, 3.1, 5.03, 2.9, ['**Shows its working.** Every date, time and room points to the words it came from.',
-                               '**Asks when unsure.** "Thursday? But 13 Nov 2026 is a Friday."',
-                               '**Finds clashes.** Two events at once, or a deadline during a class.',
-                               '**No AI.** Same answer every time, and the reading happens on the phone.'], 14, space=7)
+band(s, 7.85, 2.6, 5.03, 'What others will not have')
+text(s, 7.85, 3.1, 5.03, 2.9, ['**Shows where each date came from.** Tap a date and the notice lights up the words.',
+                               '**Catches a notice that disagrees with itself.** "Results by 9 PM today" and "results next day": both shown, you pick one.',
+                               '**Never makes up a date.** "This week or next week" waits in a list, not in your calendar.',
+                               '**One change updates the whole class.** The class rep publishes once; a postponed exam moves in every student\'s calendar.'], 13, space=6)
 headline(s, 7.85, 6.05, 5.03, 0.78, '3 of 3 events right', 'and both clashes found on the PS-02 example', bs=20, ls=13)
 
 # ---------------------------------------------------------------- 3. technical approach
