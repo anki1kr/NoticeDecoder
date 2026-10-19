@@ -295,6 +295,32 @@ await page.getByRole('button', { name: 'Exam day clash (PDF sample)' }).click();
 await page.waitForSelector('#event-list .ev');
 await page.screenshot({ path: 'tmp/shot-pdf-1280.png', fullPage: true });
 
+// 17. My schedule: what was added from this browser is clash-checked against the next notice
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => localStorage.removeItem('nd-schedule'));
+await page.locator('#clear-btn').click();
+await page.locator('#notice-input').fill('Guest lecture on 20 Nov 2026 at 10 AM in Seminar Hall.');
+await page.locator('#decode-btn').click();
+await page.waitForSelector('#event-list .ev, #event-list .row');
+await page.locator('#gcal-all-btn').click();
+await page.waitForFunction(() => /Google Calendar: added 1/.test(document.querySelector('#export-status').innerText), null, { timeout: 10000 }).catch(() => {});
+ok(await page.evaluate(() => (JSON.parse(localStorage.getItem('nd-schedule') || '[]')).length) === 1, 'my schedule: the added event is remembered on this device');
+await page.locator('#clear-btn').click();
+await page.locator('#notice-input').fill('Internal Test 2 on 20 Nov 2026 from 10:30 AM to 11:30 AM in Room 204.');
+await page.locator('#decode-btn').click();
+await page.waitForSelector('#event-list .ev, #event-list .row');
+const rowsText = await page.locator('#clash-rows').innerText();
+ok(/already in your calendar/.test(rowsText) && /Clash\./.test(rowsText), 'my schedule: a new notice clashes with an event added earlier', rowsText);
+ok(await page.locator('#schedule-note').isVisible(), 'my schedule: the note says it is kept on this device');
+await page.locator('#schedule-note button').click();
+ok(!(await page.locator('#clash-rows').innerText()).includes('already in your calendar') && await page.locator('#schedule-note').isHidden(), 'my schedule: Clear them forgets it');
+await page.locator('#clear-btn').click();
+await page.locator('#notice-input').fill('Every Monday and Wednesday 4-5 PM remedial class for backlog students starting 9 Nov 2026 in Lab 3.');
+await page.locator('#decode-btn').click();
+await page.waitForSelector('#event-list .ev, #event-list .row');
+ok(/no end date/i.test(await page.locator('#event-list').innerText()), 'weekly notice: the card asks about the missing end date');
+ok(await page.locator('#export-btn').isEnabled() === false, 'weekly notice: export locked until the student confirms');
+
 ok(errors.length === 0, 'no console or page errors', errors.join(' | '));
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();

@@ -7,6 +7,7 @@ import { SAMPLES } from './samples.js';
 import * as gcal from './gcal.js';
 import { FEED_BASE } from './config.js';
 import { fixOcrText } from './engine/ocrfix.js';
+import * as schedule from './schedule.js';
 // ocr.js and pdftext.js are imported on first use (they pull a reader library from a CDN once).
 
 const AUTO_ADD_KEY = 'nd-auto-add';
@@ -67,6 +68,7 @@ const els = {
   add: $('#add-btn'),
   clashDays: $('#clash-days'),
   clashHint: $('#clash-hint'),
+  scheduleNote: $('#schedule-note'),
   clashWrap: $('#clash-table-wrap'),
   clashRows: $('#clash-rows'),
   pending: $('#pending-section'),
@@ -176,6 +178,7 @@ function workingCopy(raw, index) {
     durationMin: Number.isFinite(raw.durationMin) && raw.durationMin > 0 ? raw.durationMin : null,
     link: safeUrl(raw.link),
     repeat: Number.isFinite(raw.repeat) ? raw.repeat : null,
+    every: /^(?:(?:SU|MO|TU|WE|TH|FR|SA)(?:,|$))+$/.test(raw.every) ? raw.every : null,
     point: Boolean(raw.point),
     window: Boolean(raw.window),
     reportAt: safeTime(raw.reportAt),
@@ -376,6 +379,14 @@ function whenText(ev) {
   return ev.end ? `${fmt12(ev.start)} - ${fmt12(ev.end)}` : fmt12(ev.start);
 }
 
+// What `repeat` and `every` mean, in words: "every Mon and Wed, 8 times" or "2 days in a row".
+function repeatText(ev) {
+  if (!(ev.repeat > 1)) return '';
+  if (!ev.every) return `${ev.repeat} days in a row`;
+  const names = ev.every.split(',').map((c) => ({ SU: 'Sun', MO: 'Mon', TU: 'Tue', WE: 'Wed', TH: 'Thu', FR: 'Fri', SA: 'Sat' }[c]));
+  return `every ${names.join(' and ')}, ${ev.repeat} times`;
+}
+
 function shortDate(iso) {
   if (!safeDate(iso)) return 'No date';
   const [y, m, d] = iso.split('-').map(Number);
@@ -387,7 +398,7 @@ function buildRow(ev) {
   const open = () => { ev.expanded = true; renderEvents(); cards.get(ev.id)?.querySelector('input')?.focus(); };
   const row = el('div', { class: `row ev c${ev.color}`, dataset: { id: ev.id } },
     el('span', { class: `dot c${ev.color}` }),
-    el('span', { class: 'row-when' }, `${shortDate(ev.date)} · ${whenText(ev)}`),
+    el('span', { class: 'row-when' }, `${shortDate(ev.date)} · ${whenText(ev)}${ev.repeat > 1 ? ` · ${repeatText(ev)}` : ''}`),
     el('span', { class: 'row-title' }, titleOf(ev), ev.venue ? el('span', { class: 'row-venue' }, ` · ${ev.venue}`) : null),
     el('span', { class: 'badge' }, ev.typeLabel),
     el('span', { class: 'row-actions' },
@@ -437,6 +448,7 @@ function buildCard(ev) {
   card.append(
     el('div', { class: 'card-head' },
       el('span', { class: 'badge' }, ev.typeLabel),
+      ev.repeat > 1 ? el('span', { class: 'badge' }, repeatText(ev)) : null,
       el('span', { class: 'head-actions' },
         el('a', { class: 'btn small open-link', target: '_blank', rel: 'noopener', 'aria-label': `Open the link for ${titleOf(ev)}` }, 'Open link'),
         el('a', { class: 'btn small gcal', target: '_blank', rel: 'noopener', 'aria-label': `Add ${titleOf(ev)} to Google Calendar` }, 'Add to Google Calendar'),
@@ -559,9 +571,18 @@ function afterListChange() {
 
 // ---------- render: clashes ----------
 
+const todayISO = () => new Date().toLocaleDateString('en-CA');
+
+// Events already in the student's calendar from earlier notices. They only show up where they meet this notice.
+function savedEvents() {
+  return schedule.upcoming(todayISO(), state.events)
+    .map((e, i) => ({ ...e, id: `saved-${i}`, saved: true, color: 'saved', title: `${e.title} (already in your calendar)`, flags: [] }));
+}
+
 function currentClashes() {
   try {
-    return findClashes(state.events) || [];
+    const all = findClashes([...state.events, ...savedEvents()]) || [];
+    return all.filter((c) => !(c.a.startsWith('saved-') && c.b.startsWith('saved-')) && (c.kind !== 'none' || !(c.a.startsWith('saved-') || c.b.startsWith('saved-'))));
   } catch (err) {
     console.error('findClashes failed', err);
     return [];
@@ -578,8 +599,9 @@ function groupByDate(events) {
 
 function renderClashes() {
   const clashes = currentClashes();
-  const byId = new Map(state.events.map((ev) => [ev.id, ev]));
-  const days = groupByDate(state.events).filter(([, evs]) => evs.length >= 2);
+  const mine = savedEvents();
+  const byId = new Map([...state.events, ...mine].map((ev) => [ev.id, ev]));
+  const days = groupByDate([...state.events, ...mine]).filter(([, evs]) => evs.length >= 2 && evs.some((ev) => !ev.saved));
   els.clashDays.replaceChildren(...days.map(([iso, evs]) => renderDay(iso, evs, clashes)).filter(Boolean));
   const rows = clashes.map((c) => clashRow(c, byId)).filter(Boolean);
   els.clashRows.replaceChildren(...rows);
@@ -587,6 +609,10 @@ function renderClashes() {
   els.clashHint.textContent = days.length
     ? 'Each day with two or more events is checked below. Red means the times collide.'
     : 'No two events share a date, so there is nothing to check yet.';
+  const kept = schedule.count(todayISO());
+  els.scheduleNote.hidden = kept === 0;
+  els.scheduleNote.replaceChildren(`${kept} event${kept === 1 ? '' : 's'} you added from earlier notices ${kept === 1 ? 'is' : 'are'} kept on this device, so every new notice is checked against ${kept === 1 ? 'it' : 'them'}. `,
+    el('button', { type: 'button', class: 'btn small', onclick: () => { schedule.clear(); renderAll(); } }, 'Clear them'));
 }
 
 // Start/end in minutes. A deadline with no end is a point in time.
@@ -736,8 +762,8 @@ const inCompanion = () => Boolean(window.ReactNativeWebView);
 async function addAllToGoogle({ silent = false } = {}) {
   if (state.busy || exportBlock()) return;
   if (inCompanion()) {
-    const events = state.events.map(({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }) =>
-      ({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }));
+    const events = state.events.map(({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, every, point, window: w, reportAt }) =>
+      ({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, every, point, window: w, reportAt }));
     window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'nd-add', events }));
     state.exportNote = { kind: 'ok', text: 'Handed to your phone calendar.' };
     renderExport();
@@ -749,6 +775,7 @@ async function addAllToGoogle({ silent = false } = {}) {
     const result = await gcal.addAll(state.events, { reminders: els.reminders.checked, silent }, window.__ndGcalDeps || {});
     if (!result) { state.exportNote = silent ? { kind: '', text: 'Signed out of Google: tap "Add all" once to sign in; after that shared notices add themselves.' } : null; return; }
     state.gcalLast = result;
+    if (result.added.length || result.updated.length) schedule.remember(state.events, todayISO());
     const parts = [];
     if (result.added.length) parts.push(`added ${result.added.length}`);
     if (result.updated.length) parts.push(`updated ${result.updated.length}`);
@@ -803,6 +830,7 @@ async function undoGoogle() {
   state.gcalLast = null;
   try {
     const n = await gcal.removeAll(last.added, window.__ndGcalDeps || {});
+    schedule.forget(state.events);
     state.exportNote = { kind: 'ok', text: `Removed ${n} event${n === 1 ? '' : 's'} from Google Calendar.` };
   } catch (err) {
     state.exportNote = { kind: 'error', text: String(err.message || err) };
@@ -828,6 +856,7 @@ function downloadIcs() {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    schedule.remember(state.events, todayISO());
     const n = state.events.length;
     state.exportNote = {
       kind: 'ok',
@@ -887,7 +916,7 @@ function shareUrl() {
     on: new Date().toISOString().slice(0, 10),
     e: state.events.map((ev) => ({
       t: ev.title, k: ev.type, d: ev.date, s: ev.start, e: ev.end, v: ev.venue, l: ev.link,
-      m: ev.durationMin, r: ev.repeat, p: ev.point ? 1 : 0, w: ev.window ? 1 : 0,
+      m: ev.durationMin, r: ev.repeat, y: ev.every || undefined, p: ev.point ? 1 : 0, w: ev.window ? 1 : 0,
     })),
   };
   const url = new URL(location.href);
@@ -905,7 +934,7 @@ function loadShared(hash) {
   const events = payload.e.slice(0, 50).map((x, i) => workingCopy({
     id: `s${i + 1}`, title: String(x.t || '').slice(0, 120), type: x.k, typeLabel: TYPE_LABELS[x.k] || 'Other',
     date: x.d, start: x.s, end: x.e, venue: x.v ? String(x.v).slice(0, 120) : null, link: x.l,
-    durationMin: Number(x.m) || null, repeat: Number(x.r) || null, point: Boolean(x.p), window: Boolean(x.w),
+    durationMin: Number(x.m) || null, repeat: Number(x.r) || null, every: x.y, point: Boolean(x.p), window: Boolean(x.w),
     why: { title: 'from the shared link' }, flags: [],
   }, i));
   if (!events.length) return false;
@@ -981,7 +1010,8 @@ async function loadConsole() {
   try {
     const data = await feedCall('GET', `/api/class/${c.id}/events`, { token: c.secret });
     const live = data.events.filter((e) => !e.cancelled);
-    els.classConsoleHint.textContent = `${live.length} event${live.length === 1 ? '' : 's'} in ${data.name}${data.clashes.length ? `, ${data.clashes.length} clash${data.clashes.length > 1 ? 'es' : ''} across the term` : ', no clashes across the term'}.`;
+    els.classConsoleHint.textContent = `${live.length} event${live.length === 1 ? '' : 's'} in ${data.name}${data.clashes.length ? `, ${data.clashes.length} clash${data.clashes.length > 1 ? 'es' : ''} across the term` : ', no clashes across the term'}.`
+      + (data.stats ? ` Term so far: ${data.stats.publishes} publish${data.stats.publishes === 1 ? '' : 'es'}, ${data.stats.revised} revised, ${data.stats.cancelled} cancelled, ${data.stats.clashesFound} clash${data.stats.clashesFound === 1 ? '' : 'es'} reported before the date.` : '');
     els.classConsoleList.replaceChildren(
       ...data.clashes.map((x) => el('li', { class: 'console-clash' }, el('strong', {}, 'Clash: '), `${x.a} × ${x.b} (${fmtDate(x.date)}). ${x.msg.replace(/^Clash\.\s*/, '')}${x.action ? ` ${x.action}` : ''}`)),
       ...data.events.map((e) => el('li', { class: e.cancelled ? 'console-cancelled' : '' },
@@ -1018,8 +1048,8 @@ async function publishToClass() {
       saveClass(c);
       renderClass();
     }
-    const events = state.events.map(({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }) =>
-      ({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, point, window: w, reportAt }));
+    const events = state.events.map(({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, every, point, window: w, reportAt }) =>
+      ({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, every, point, window: w, reportAt }));
     const r = await feedCall('POST', `/api/class/${c.id}/publish`, { body: { events }, token: c.secret });
     const clashes = r.clashes.length
       ? ` ${r.clashes.length} clash${r.clashes.length > 1 ? 'es' : ''} across everything published so far: ${r.clashes.map((x) => `${x.a} x ${x.b} (${x.date})`).join('; ')}.`

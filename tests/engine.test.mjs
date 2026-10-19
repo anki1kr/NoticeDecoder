@@ -353,4 +353,62 @@ test('Copy-paste noise: a day that does not exist, invisible characters, WhatsAp
   assert.equal(parseNotice('05/11/2026: Internal test at 10 AM in Room 204', at).events[0].date, '2026-11-05');
 });
 
+test('Exam acronyms (MST-2, CIE-1) are tests and keep their number', () => {
+  const [a] = one('Dear students, MST-2 for CSE 3rd sem will be held on 18th Nov from 10am to 12pm in LT-2.');
+  assert.deepEqual([a.type, a.title, a.date, a.start, a.end, a.venue], ['test', 'MST-2', '2026-11-18', '10:00', '12:00', 'LT-2']);
+  const [b] = one('CIE-1 on 20 Nov 10 AM');
+  assert.deepEqual([b.type, b.title], ['test', 'CIE-1']);
+});
+
+test('Example 10: an extended deadline takes the new date, ranges and "&" run on every day, a bare "Event" is named after the notice', () => {
+  const r = parseNotice(read('10-extended-deadline-and-ranges.txt'), { pastedAt });
+  assert.equal(r.events.length, 5);
+  const [d, exams, reg, hack, shop] = r.events;
+  assert.deepEqual([d.type, d.date, d.start], ['deadline', '2026-11-22', '17:00']);
+  assert.ok(d.flags.some((f) => /It was 15 Nov 2026/.test(f.msg)));
+  assert.deepEqual([exams.date, exams.repeat], ['2026-11-10', 9]);
+  assert.equal(reg.type, 'deadline');
+  assert.deepEqual([hack.title, hack.date, hack.repeat, hack.venue], ['Hackathon', '2026-11-01', 2, 'Seminar Hall']);
+  assert.deepEqual([shop.title, shop.date, shop.repeat, shop.start, shop.end], ['Workshop: AI/ML', '2026-12-05', 2, '09:30', '16:30']);
+});
+
+test('Example 11: "Maths on 12 Nov, Physics on 13 Nov and Chemistry on 14 Nov" is three tests, each named by its subject', () => {
+  const r = parseNotice(read('11-subject-lists-and-weekly.txt'), { pastedAt });
+  assert.deepEqual(r.events.slice(0, 3).map((e) => [e.type, e.title, e.date, e.start]), [
+    ['test', 'Internal tests: Maths', '2026-11-12', '10:00'],
+    ['test', 'Internal tests: Physics', '2026-11-13', '10:00'],
+    ['test', 'Internal tests: Chemistry', '2026-11-14', '10:00'],
+  ]);
+  const [u] = one('Unit test 3 for Physics on 12.11.26 at 9.00 a.m. in room no. 305 and Chemistry on 13.11.26 at 9 am');
+  assert.equal(u.title, 'Unit test 3: Physics');
+});
+
+test('Weekly events: BYDAY rule in the calendar file, a clash on every occurrence, a notice with no end date says so', () => {
+  const r = parseNotice(read('11-subject-lists-and-weekly.txt'), { pastedAt });
+  const w = r.events.find((e) => e.title === 'Remedial class');
+  assert.deepEqual([w.date, w.start, w.end, w.every, w.repeat, w.venue], ['2026-11-09', '16:00', '17:00', 'MO,WE', 8, 'Lab 3']);
+  assert.ok(w.flags.some((f) => f.level === 'warn' && /no end date/.test(f.msg)));
+  const ics = toICS(r.events, { now: new Date(2026, 9, 14) });
+  assert.match(ics, /RRULE:FREQ=WEEKLY;BYDAY=MO,WE;COUNT=8/);
+  const till = one('Python course every Saturday 10 AM to 12 PM from 7 Nov till 28 Nov, Room 5')[0];
+  assert.deepEqual([till.every, till.repeat, till.date], ['SA', 4, '2026-11-07']);
+  assert.ok(!till.flags.some((f) => /no end date/.test(f.msg)));
+  const weekly = { id: 'a', title: 'Remedial class', type: 'lecture', typeLabel: 'Lecture', date: '2026-11-09', start: '16:00', end: '17:00', repeat: 8, every: 'MO,WE' };
+  const onWed = { id: 'b', title: 'Test', type: 'test', typeLabel: 'Test', date: '2026-11-18', start: '16:30', end: '17:30' };
+  const onTue = { ...onWed, id: 'c', date: '2026-11-17' };
+  const rows = findClashes([weekly, onWed, onTue]).filter((c) => c.kind === 'overlap');
+  assert.deepEqual(rows.map((c) => [c.a, c.b, c.date]), [['a', 'b', '2026-11-18']]);
+});
+
+test('Hinglish: "Room 12 me", a one-word "class" that is cancelled, "nahi hogi"; "Mr." does not end the sentence', () => {
+  const r = parseNotice(read('12-hinglish-class-change.txt'), { pastedAt });
+  assert.equal(r.events.length, 1);
+  const [e] = r.events;
+  assert.deepEqual([e.type, e.title, e.date, e.start, e.venue], ['lecture', 'Extra class', '2026-10-15', '15:00', 'Room 12']);
+  assert.ok(r.warnings.some((w) => /cancels something/.test(w.msg) && /Aaj wali class cancel hai/.test(w.msg)));
+  const k = parseNotice('Kal ki class nahi hogi. Test on 9 Nov 10 AM.', { pastedAt });
+  assert.equal(k.events.length, 1);
+  assert.ok(k.warnings.some((w) => /cancels something/.test(w.msg)));
+});
+
 console.log(`\n${passed} passed`);

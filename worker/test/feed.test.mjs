@@ -127,4 +127,19 @@ await test('junk is refused: bad JSON, no events, events without a date, unknown
   assert.equal(opt.headers.get('access-control-allow-origin'), '*');
 });
 
+await test('pilot numbers: publishes, revisions, clashes counted once, cancellations', async () => {
+  const c = await (await req('POST', '/api/class', { body: { name: 'II ECE B' } })).json();
+  const pub = (events) => req('POST', `/api/class/${c.id}/publish`, { body: { events }, token: c.secret });
+  await pub([test2, lecture, deadline]);
+  await pub([{ ...test2, start: '14:00', end: '15:30' }]);
+  await pub([{ ...test2, start: '14:00', end: '15:30' }]);
+  const listed = await (await req('GET', `/api/class/${c.id}/events`, { token: c.secret })).json();
+  const uid = listed.events.find((e) => e.title === deadline.title).uid;
+  await req('DELETE', `/api/class/${c.id}/events/${encodeURIComponent(uid)}`, { token: c.secret });
+  const { stats } = await (await req('GET', `/api/class/${c.id}/events`, { token: c.secret })).json();
+  assert.deepEqual([stats.publishes, stats.events, stats.revised, stats.cancelled, stats.clashesFound], [3, 2, 1, 1, 2]);
+  assert.ok(stats.since);
+  assert.ok(!('clashSeen' in stats), 'the clash keys stay inside the class record');
+});
+
 console.log(`\n${passed} passed`);

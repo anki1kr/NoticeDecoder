@@ -32,6 +32,16 @@ export async function targetCalendarId() {
   return id;
 }
 
+// expo-calendar numbers the weekdays Sunday = 1 ... Saturday = 7.
+const WEEKDAY = { SU: 1, MO: 2, TU: 3, WE: 4, TH: 5, FR: 6, SA: 7 };
+
+function recurrenceOf(rule) {
+  const occurrence = Number(/COUNT=(\d+)/.exec(rule)?.[1] || 1);
+  const by = /BYDAY=([A-Z,]+)/.exec(rule)?.[1];
+  if (!by) return { frequency: Calendar.Frequency.DAILY, occurrence };
+  return { frequency: Calendar.Frequency.WEEKLY, daysOfTheWeek: by.split(',').map((c) => ({ dayOfTheWeek: WEEKDAY[c] })), occurrence };
+}
+
 function details(entry) {
   return {
     title: entry.summary,
@@ -42,7 +52,7 @@ function details(entry) {
     notes: `${entry.description}\nuid:${entry.uid}`,
     timeZone: 'Asia/Kolkata',
     alarms: entry.reminder ? [{ relativeOffset: -entry.reminder.minutes }] : [],
-    ...(entry.recurrence ? { recurrenceRule: { frequency: Calendar.Frequency.DAILY, occurrence: Number(/COUNT=(\d+)/.exec(entry.recurrence)?.[1] || 1) } } : {}),
+    ...(entry.recurrence ? { recurrenceRule: recurrenceOf(entry.recurrence) } : {}),
   };
 }
 

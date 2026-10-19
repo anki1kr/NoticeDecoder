@@ -29,8 +29,9 @@
 
   <h2>Google Calendar (optional)</h2>
   <p>If you press <b>Add all to Google Calendar</b>, Google asks you to sign in and allow Notice Decoder to
-  <b>create and edit events on your calendars</b> (the <code>calendar.events</code> permission). We use it only to
-  add, update or undo the events you reviewed, and nothing else: we do not read your other events or your email. The
+  <b>create a calendar called "Notice Decoder" and manage events in it</b> (the <code>calendar.app.created</code> permission).
+  We use it only to add, update or undo the events you reviewed in that calendar, and nothing else: we cannot see your
+  other calendars or events, and we do not read your email. The
   access token is kept in your browser for up to one hour (session storage) and is never sent to us. You can remove the
   permission any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.
   Notice Decoder's use of information received from Google APIs adheres to the
@@ -40,14 +41,16 @@
   <h2>What is stored in your browser</h2>
   <ul>
     <li>Settings such as "Add automatically" and the class you opened.</li>
+    <li>The events you added to a calendar from this browser (title, date, time, venue), so a new notice can be checked against them for clashes. Past events are dropped; "Clear them" under Clashes removes the rest.</li>
     <li>A short queue of reviewed events that could not be added while you were offline (the last 10), removed once they are added.</li>
   </ul>
   <p>Clearing the site's data in your browser removes all of it.</p>
 
   <h2>Class calendar (optional)</h2>
   <p>If a class representative publishes events to a class calendar, those reviewed events (title, date, time, venue)
-  are stored on a calendar service so classmates can subscribe. Nothing is published unless the representative presses
-  Publish.</p>
+  are stored on a calendar service so classmates can subscribe, together with a few counters for the class console
+  (how many publishes, revisions and cancellations, and which clashes were reported). Nothing is published unless the
+  representative presses Publish.</p>
 
   <h2>No ads, no tracking</h2>
   <p>There are no ads, no analytics and no tracking scripts in the app.</p>

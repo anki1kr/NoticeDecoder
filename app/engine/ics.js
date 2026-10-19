@@ -154,7 +154,7 @@ export function calendarEntries(events) {
       description: descriptionOf(e, st),
       category: (e.typeLabel || e.type).toUpperCase(),
       url: e.link || null,
-      recurrence: e.repeat > 1 ? `RRULE:FREQ=DAILY;COUNT=${e.repeat}` : null,
+      recurrence: e.repeat > 1 ? `RRULE:FREQ=${e.every ? `WEEKLY;BYDAY=${e.every}` : 'DAILY'};COUNT=${e.repeat}` : null,
       reminder: e.start ? (REMINDER[e.type] || REMINDER.other) : null,
       title: titleOf(e),
       type: e.type,

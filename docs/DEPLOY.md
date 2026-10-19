@@ -14,9 +14,9 @@ The "Add all to Google Calendar" button needs a public OAuth **Web** client id. 
 1. https://console.cloud.google.com → pick the project (`playzone-504313`, or **New project** "Notice Decoder").
 2. **APIs & Services → Library** → search *Google Calendar API* → **Enable**.
 3. **APIs & Services → OAuth consent screen** → External → App name "Notice Decoder", your email as support and
-   developer contact → Save. Under **Audience / Test users** add the team's and the judges' Google accounts
-   (Testing mode allows 100 users; no verification needed for the hackathon).
-   Scopes: add `https://www.googleapis.com/auth/calendar.events` (non-sensitive list → "calendar.events").
+   developer contact → Save. Scopes: add `https://www.googleapis.com/auth/calendar.app.created` (non-sensitive: the app
+   only sees a "Notice Decoder" calendar it creates itself). Because the scope is non-sensitive, set the publishing
+   status to **In production**: no test-user list is needed and nobody gets the "Google hasn't verified this app" screen.
 4. **Credentials → Create credentials → OAuth client ID** → Application type **Web application** →
    Name "Notice Decoder web" → **Authorised JavaScript origins**: `https://anki1kr.me` and `http://127.0.0.1:8771`
    (no redirect URIs: the page uses the token flow) → Create → copy the **Client ID** (`…apps.googleusercontent.com`).

@@ -1,6 +1,6 @@
 // Notice -> events. Pure rules, no AI: every field records the rule that set it (why) and the
 // exact words it came from (sources), so the UI can explain and highlight each result.
-import { findDates, findTimes, findDurations, iso, addDays, daysBetween, prettyDate, localISO, fmt12, toMin, fromMin, weekdayOf, WEEKDAY_NAMES } from './dates.js';
+import { findDates, findTimes, findDurations, iso, addDays, daysBetween, prettyDate, localISO, fmt12, toMin, fromMin, weekdayOf, WEEKDAY_NAMES, DAY_CODES } from './dates.js';
 import { holidayOn } from './holidays.js';
 
 // Keyword families, checked in this order. type = one of the problem statement's types.
@@ -14,34 +14,38 @@ const FAMILIES = [
   { fam: 'test', type: 'test', re: /\b(practical vivas?|lab vivas?|internal tests?|unit tests?|class tests?|slip tests?|surprise tests?|mock tests?|mid[- ]?(?:terms?|sems?|semesters?)(?: exams?| tests?)?|sessionals?(?: exams?)?|end[- ]?sem(?:ester)?(?: (?:exams?|practicals?))?|semester exams?|model exams?|lab exams?|re-?exams?|supplementary(?: exams?)?|backlog exams?|internal assessments?|examinations?|exams?|tests?|quiz(?:zes)?|viva(?: voce)?|practicals?|assessments?|aptitude|olympiad)\b/i },
   { fam: 'test', type: 'test', re: /(परीक्षा|टेस्ट|क्विज़|क्विज|प्रैक्टिकल|मौखिकी)/u },
   // Exam acronyms are case-sensitive on purpose: "see" and "cat" are ordinary words.
-  { fam: 'test', type: 'test', re: /(CIE|SEE|CAT[- ]?[12]|FAT|MST|EST)/ },
+  { fam: 'test', type: 'test', re: /\b(CIE|SEE|CAT[- ]?[12]|FAT|MST|EST)\b/ },
   { fam: 'deadline', type: 'deadline', re: /\b(submissions?|submit(?:ted)?|upload(?:ed|ing)?|deadline|last date|due(?! to)(?: date)?|registrations?|fee payment|fees?|pay(?:ment)?)\b/i },
-  { fam: 'lecture', type: 'lecture', re: /\b(guest lectures?|expert lectures?|lectures?|classes|tutorials?|seminars?(?!\s+(?:hall|room))|webinars?|workshops?|masterclass(?:es)?|bootcamps?|sessions?|orientation|induction|talks?|trainings?)\b/i },
+  { fam: 'lecture', type: 'lecture', re: /\b((?:extra|remedial|make-?up|doubt|revision|bridge|special|additional|compensatory|substitute)\s+(?:class(?:es)?|lectures?|sessions?)|guest lectures?|expert lectures?|lectures?|classes|courses?|tutorials?|seminars?(?!\s+(?:hall|room))|webinars?|workshops?|masterclass(?:es)?|bootcamps?|sessions?|orientation|induction|talks?|trainings?)\b/i },
   { fam: 'lecture', type: 'lecture', re: /(व्याख्यान|कक्षा|सेमिनार|कार्यशाला|वेबिनार|सत्र)/u },
-  { fam: 'other', type: 'other', re: /\b(placement drives?|campus drives?|pool campus|drives?|fests?|hackathons?|meetings?|ceremony|convocation|competitions?|sports day|annual day|farewell|freshers?(?:['’]s)? party|cultural (?:fest|event|night)|parade|camp|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
+  { fam: 'other', type: 'other', re: /\b(placement drives?|campus drives?|pool campus|drives?|fests?|hackathons?|(?:industrial|field|educational|study)\s+(?:visits?|trips?|tours?)|excursions?|meetings?|ceremony|convocation|competitions?|sports day|annual day|farewell|freshers?(?:['’]s)? party|cultural (?:fest|event|night)|parade|camp|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
   { fam: 'other', type: 'other', re: /(कार्यक्रम|प्रतियोगिता|बैठक|समारोह|उत्सव)/u },
 ];
 const TYPE_LABEL = { test: 'Test', deadline: 'Deadline', lecture: 'Lecture', other: 'Event' };
 const TYPE_PHRASE = { test: 'a test', deadline: 'a deadline', lecture: 'a lecture or talk', other: 'an event' };
-const REVISED = /\b(postponed|rescheduled|preponed|pre-poned|shifted|moved|changed|deferred)\s+(?:to|till|until|on)\b/i;
-const RANGE_JOIN = /^\s*(?:,|and|&|to|till|until|-|–|aur|और|व|से)\s*$/i;
+const REVISED = /\b(?:(?:postponed|rescheduled|preponed|pre-poned|shifted|moved|changed|deferred)\s+(?:to|till|until|on)|(?:extended|advanced|revised|prolonged)\s+(?:from\s+[^.\n]{0,45}?\s+)?(?:to|till|until))\b/i;
+const RANGE_JOIN = /^\s*(?:,|and|&|to|till|until|-|–|aur|और|व|से|(?:and\s+)?(?:will\s+)?(?:end|conclude|finish)(?:s|ing)?(?:\s+(?:on|by))?)\s*$/i;
 
 const LABEL_LINE = /^[^\p{L}\p{N}\n]*\s*(date|day|time|timings?|venue|place|location|platform|mode|eligibility|participation|duration|reporting time|दिनांक|तिथि|समय|स्थान)\s*[:\-–]/iu;
 const VAGUE = /\b((?:in|within|over)\s+(?:the\s+)?(?:upcoming|coming|next\s+few)\s+days|(?:this|next|coming)\s+(?:week|month)(?:\s+or\s+(?:this|next)\s+(?:week|month))?|next working days?|will be (?:confirmed|announced|intimated|informed|notified|decided)|to be (?:announced|decided|confirmed|notified)|TBD|TBA)\b/i;
 const DEADLINE_CUE = /\b(by|before|latest by|not later than|within|till|until|on or before|तक)\b[^.\n]{0,25}$/iu;
 const END_CUE = /^\W*(?:and\s+)?(?:(?:will\s+|would\s+|should\s+)?(?:ends?|close[sd]?|finish(?:es)?|get over|conclude[sd]?|be over)\s+(?:by|at|around)|to|till|until|upto|up to)\W*$/i;
 const NOTE = /^(note\b[\s:\-–]*|please (?:do not|don['’]t|note|ensure|carry|bring)|do not|don['’]t|also ensure|ensure|make sure|carry|bring|mandatory|compulsory|students (?:must|should))/i;
-const STOP = new Set('a an the all our your their his her its this that these those of for to in on at by from with and or is are was were be will can may dear please thanks thank expect steps exactly kindly also free today today’s today\'s you we they it as about into take join have has had see attend attended attending find below details selected shortlisted students student'.split(' '));
+const STOP = new Set('no not a an the all our your their his her its this that these those of for to in on at by from with and or is are was were be will can may dear please thanks thank expect steps exactly kindly also free today today’s today\'s you we they it as about into take join have has had see attend attended attending find below details selected shortlisted students student'.split(' '));
 // Words that do not tell two events apart: "Test" and "Maths test" may be the same thing, "Maths test" and "Physics test" are not.
 const GENERIC = new Set('event events test tests exam exams quiz deadline lecture lectures class classes session sessions submission registration workshop seminar webinar meeting viva practical practicals drive interview gd group discussion guest internal online offline'.split(' '));
 // Hindi function words that never name an event.
 const HINDI_STOP = 'की का के को में पर से और है हैं होगी होगा होंगे एवं तथा या कि'.split(' ');
 // Place words. Indian campuses also say "LT-3" (lecture theatre), "CR-2" (classroom), "Lab-II", "Block A-204", "SH 1".
 const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*)((?:[A-Za-z]+\s+){0,2}?(?:(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b(?:-?\d{1,3})?|\s*(?:no\.?\s*)?[A-Z]?-?(?:\d{1,4}[A-Za-z]?|[IVX]{1,4}))?|(?:LT|CR|SH|LH|TH)[- ]?(?:\d{1,3}|[IVX]{1,4})\b))\b/i;
+// Hinglish puts the place first: "Room 12 me", "Lab 3 mein".
+const HINGLISH_PLACE = /\b((?:room|hall|lab|auditorium|block|classroom|library|seminar hall)\s*(?:no\.?\s*)?[A-Z]?-?\d{1,4}[A-Za-z]?)\s+(?:me|mein|mai|mei)\b/i;
 const ONLINE = /\b(zoom|google meet|ms teams|microsoft teams|webex|youtube live)\b/i;
 const HINDI_PLACE = /((?:कमरा|कक्ष|कमरे|हॉल|सभागार|प्रयोगशाला|लैब|पुस्तकालय|मैदान)\s*(?:नं\.?|संख्या|नंबर)?\s*[\dA-Za-z०-९-]*)/u;
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
-const CANCEL = /\b(cancell?ed|cancels?|called off|will not be held|cancel ho gay[ia]|stands cancelled)\b|रद्द/i;
+const CANCEL = /\b(cancell?ed|cancels?|called off|will not be held|cancel (?:ho gay[ia]|hai|hoga|hua|kar di[ay]e?)|nahi (?:hogi|hoga|honge|hui)|stands cancelled)\b|रद्द/i;
+const NO_SESSION = /\bno\s+(?:classes|class|lectures?|teaching|tests?|exams?)\b|\b(?:classes|lectures|college|campus|library)\s+(?:will\s+)?(?:remains?|be)\s+closed\b/i;
+const CLASS_WORD =/\b(class|lecture|period|lab|practical|test|exam)\b/i;
 const GROUP_INVITE = /chat\.whatsapp\.com|t\.me\/|join (?:the |our )?[^.\n]{0,40}\b(?:whatsapp|telegram) group/i;
 // Timetable rows: "10 Nov 2026 - Maths - 10 AM to 1 PM - Room 1", "Mon | 19/10 | DBMS | 2 PM | Lab 2"
 const CELL_SPLIT = /\s*\|\s*|\t+|\s+[-–—]\s+|\s{3,}/;
@@ -83,7 +87,7 @@ function units(text) {
     const { s, t } = lines[i];
     if (t.trim()) {
       let start = 0;
-      for (const m of t.matchAll(/[.!?।](?=\s+["“(]?[A-Z\u0900-\u097F])/gu)) { out.push({ s: s + start, e: s + m.index + 1 }); start = m.index + 1; }
+      for (const m of t.matchAll(/(?<!\b(?:Mr|Mrs|Ms|Dr|Prof|Shri|Smt|St|No|Sr|Jr|[A-Z]))[.!?।](?=\s+["“(]?[A-Z\u0900-\u097F])/gu)) { out.push({ s: s + start, e: s + m.index + 1 }); start = m.index + 1; }
       out.push({ s: s + start, e: s + t.length });
     }
     i++;
@@ -96,6 +100,9 @@ function units(text) {
 
 // "Internal Test 2 at 10 AM in Room 204 and a guest lecture at 11 AM in the Seminar Hall": one sentence, two events.
 // A sentence is cut at "and" / ";" only when both halves have their own time AND their own event word.
+// "Physics on 12 Nov at 9 AM and Chemistry on 13 Nov at 9 AM": the second half has no event word but a subject, so it
+// takes the kind of the first (`inherit`); commas split only in that case.
+const SUBJECT_ON = /^[A-Z][\w+#&./-]*(?:\s+[A-Z][\w+#&./-]*){0,2}(?=\s+(?:on|at)\b)/;
 function splitCompound(us, text, times) {
   const out = [];
   for (const u of us) {
@@ -103,13 +110,15 @@ function splitCompound(us, text, times) {
     const inside = (s, e) => times.filter((t) => t.s >= s && t.e <= e);
     if (inside(u.s, u.e).length < 2) { out.push(u); continue; }
     let cur = u;
-    for (const m of u.text.matchAll(/;\s*|,?\s+(?:and|&|aur|और)\s+/g)) {
+    for (const m of u.text.matchAll(/;\s*|,?\s+(?:and|&|aur|और)\s+|,\s+/g)) {
       const p = u.s + m.index, q = p + m[0].length;
       if (p <= cur.s) continue;
       const left = text.slice(cur.s, p), right = text.slice(q, u.e);
-      if (!inside(cur.s, p).length || !inside(q, u.e).length || !keyword(left) || !keyword(right)) continue;
-      out.push({ s: cur.s, e: p, text: left, split: true });
-      cur = { s: q, e: u.e, text: right, split: true };
+      const lk = keyword(left) || (cur.inherit && keyword(cur.inherit));
+      const subject = !keyword(right) && lk && lk.fam !== 'deadline' && SUBJECT_ON.test(right);
+      if (!inside(cur.s, p).length || !inside(q, u.e).length || !lk || !(keyword(right) || subject) || (/^,\s+$/.test(m[0]) && !subject)) continue;
+      out.push({ s: cur.s, e: p, text: left, split: true, ...(cur.inherit ? { inherit: cur.inherit } : subject ? { head: true } : {}) });
+      cur = { s: q, e: u.e, text: right, split: true, ...(subject ? { inherit: cur.inherit || left } : {}) };
     }
     out.push(cur);
   }
@@ -138,6 +147,9 @@ function keyword(str) {
   return null;
 }
 
+// A weekday, month, AM/PM or clock/range word is part of the when, never of the title ("Wednesday 4-5 PM remedial class").
+const DATEISH = /^(?:\d{1,2}[:.]\d{2}|\d{1,2}-\d{1,2}|[ap]\.?m\.?|(?:sun|mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?)(?:day)?|(?:jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)[a-z]*)$/i;
+
 // Walk back from the keyword over capitalised words ("Internal Test 2", "QSpiders Placement Drive").
 function walkTitle(str, kwIndex, kw, lowercaseOk = false) {
   // Stay inside the clause: stop at line breaks, punctuation and list dashes (not hyphens inside words).
@@ -149,13 +161,14 @@ function walkTitle(str, kwIndex, kw, lowercaseOk = false) {
     const word = before[w];
     if (!word) { if (w === before.length - 1) continue; break; }
     if (HINDI_STOP.includes(word)) continue;
+    if (DATEISH.test(word)) break;
     if (STOP.has(word.toLowerCase())) break;
     if (!lowercaseOk && !/^[\p{Lu}\p{N}\p{Script=Devanagari}]/u.test(word)) break;
     words.unshift(word);
   }
   // A trailing number names the event ("Internal Test 2") unless it starts a date ("Lab exam 05/11/2026", "Test 13 Nov").
-  const num = /^\s*(\d{1,2}|[IVX]{1,4})\b(?![/.-]\d)(?!(?:st|nd|rd|th)?\s*(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|[\u0900-\u097F]))/i.exec(str.slice(kwIndex + kw.length));
-  return [...words, kw].join(' ') + (num && !/\d{3,}/.test(num[1]) ? ' ' + num[1] : '');
+  const num = /^(-|\s*)(\d{1,2}|[IVX]{1,4})\b(?![/.-]\d)(?!(?:st|nd|rd|th)?\s*(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|[\u0900-\u097F]))/i.exec(str.slice(kwIndex + kw.length));
+  return [...words, kw].join(' ') + (num && !/\d{3,}/.test(num[2]) ? (num[1] === '-' && !/[a-z]/.test(kw) ? '-' : ' ') + num[2] : '');
 }
 
 function titleFor(str, k) {
@@ -177,8 +190,11 @@ function titleFor(str, k) {
     const what = hindiDue[1].replace(/^[^\p{L}]*(?:सूचना|नोट)?[\s:\-–]*/u, '').split(/\s+/).filter((w) => !HINDI_STOP.includes(w)).slice(-3).join(' ');
     if (what) return { title: `${what} जमा`, why: `"${hindiDue[0].trim()}" = due by that date.`, at: [hindiDue.index, hindiDue.index + hindiDue[0].length] };
   }
-  const topic = /\b([Ww]orkshop|[Ss]eminar|[Ww]ebinar|[Ll]ecture|[Tt]alk|[Ss]ession|[Qq]uiz|[Hh]ackathon|[Cc]ompetition|[Tt]raining|[Mm]asterclass)\s+on\s+((?:[A-Z][\w+#.-]*\s?){1,4})/.exec(str);
-  if (topic && /^[A-Z]/.test(topic[2])) return { title: `${cap(topic[1].toLowerCase())}: ${topic[2].trim()}`, why: `"${topic[0].trim()}" names the topic.`, at: [topic.index, topic.index + topic[0].length] };
+  const topic = /\b([Ww]orkshop|[Ss]eminar|[Ww]ebinar|[Ll]ecture|[Tt]alk|[Ss]ession|[Qq]uiz|[Hh]ackathon|[Cc]ompetition|[Tt]raining|[Mm]asterclass)\s+on\s+((?:[A-Z][\w+#./&-]*\s?){1,4})/.exec(str);
+  if (topic && /^[A-Z]/.test(topic[2])) return { title: `${cap(topic[1].toLowerCase())}: ${topic[2].trim().replace(/[.,&/-]+$/, '')}`, why: `"${topic[0].trim()}" names the topic.`, at: [topic.index, topic.index + topic[0].length] };
+  const closing = /\b((?:[A-Za-z]+\s+)?(?:registrations?|admissions?|applications?|enrol?lments?))\b[^.\n]{0,40}?\bclos(?:es|ing|ed)\b/i.exec(str)
+    || /\b((?:[A-Za-z]+\s+){0,2}(?:fees?|payment|registration|submission|application|form))\b[^.\n:]{0,30}[:,\s]\s*last (?:date|day)\b/i.exec(str);
+  if (closing) return { title: `${cap(closing[1].toLowerCase())} deadline`, why: `"${closing[0].trim()}" is a deadline.`, at: [closing.index, closing.index + closing[0].length] };
   const last = /\blast (?:date|day) (?:to|for) (?:the )?(.{3,40}?)(?=\s+(?:is|on|:)\b|[,:.!?]|$)/i.exec(str);
   if (last) return { title: cap(last[1]), why: `"${last[0]}" names what is due.`, at: [last.index, last.index + last[0].length] };
   const verbObj = /\b(submit|upload|send|mail|register|pay|fill)\s+(?:your|their|the|all|his|her|in)?\s*([a-z][\w ]{2,60}?)\s+(?:by|before|on or before|latest by|till|not later than)\b/i.exec(str);
@@ -195,13 +211,13 @@ function titleFor(str, k) {
     return { title: `${noun} deadline`, why: `"${by[0]}" is a deadline.`, at: [by.index, by.index + by[0].length] };
   }
   const t = walkTitle(str, k.i, k.kw, k.fam === 'deadline');
-  const subj = k.fam === 'test' && new RegExp(String.raw`${k.kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\s+(?:in|of|for|on)\s+([A-Z][\w+#&.-]*(?:\s+[A-Z][\w+#&.-]*){0,3})(?=\s+(?:on|at|from|will|is|has|in|by)\b|[,.;:]|$)`).exec(str);
+  const subj = k.fam === 'test' && new RegExp(String.raw`${k.kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\s+\d{1,2})?\s+(?:in|of|for|on)\s+([A-Z][\w+#&.-]*(?:\s+[A-Z][\w+#&.-]*){0,3})(?=\s+(?:on|at|from|will|is|has|in|by)\b|[,.;:]|$)`).exec(str);
   if (subj) return { title: `${cap(t)}: ${subj[1]}`, why: `"${subj[0].trim()}" names the subject.`, at: [subj.index, subj.index + subj[0].length] };
   return { title: cap(t), why: `Taken from the words "${t}".` };
 }
 
 // A one-word title ("Quiz") borrows a fuller name used elsewhere in the notice ("Aptitude Quiz").
-function upgradeTitle(title, text, fam) {
+function upgradeTitle(title, text, fam, spoken = true) {
   if (/\s/.test(title)) return title;
   const re = new RegExp(String.raw`\b${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\b`, 'gi');
   let best = title;
@@ -212,6 +228,12 @@ function upgradeTitle(title, text, fam) {
       if (t.split(' ').length > best.split(' ').length && t.split(' ').length <= 4) best = cap(t);
     }
     if (best !== title) break;
+  }
+  // A bare "Event" is called what the rest of the notice calls it ("Hackathon registration closes ... Event on 1-2 Nov").
+  const named = spoken && best === title && /^(?:event|programme?)$/i.test(title) && /\b(hackathon|fest|competition|contest|tournament|workshop|seminar|webinar|conference|symposium|orientation|convocation)\b/i.exec(text);
+  if (named) {
+    const t = walkTitle(text, named.index, named[0], true);
+    if (t.split(' ').length <= 4) best = cap(t);
   }
   return best;
 }
@@ -228,6 +250,8 @@ function venueFor(u) {
   }
   const p = PLACE.exec(u.text);
   if (p) { const s = u.s + p.index + p[0].indexOf(p[1]); return { venue: cap(p[1]), span: [s, s + p[1].length], why: `Place word found: "${p[1]}".` }; }
+  const hing = HINGLISH_PLACE.exec(u.text);
+  if (hing) return { venue: cap(hing[1]), span: [u.s + hing.index, u.s + hing.index + hing[1].length], why: `Place word found: "${hing[0]}".` };
   const o = ONLINE.exec(u.text);
   if (o) return { venue: `Online (${o[1]})`, span: [u.s + o.index, u.s + o.index + o[0].length], why: `"${o[1]}" means it is online.`, zoom: /zoom/i.test(o[1]) };
   const h = HINDI_PLACE.exec(u.text);
@@ -331,12 +355,12 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
   for (const u of us) {
     let ud = inside(dates, u), ut = inside(times, u);
     const udur = inside(durations, u);
-    const k = keyword(u.text);
+    const k = keyword(u.text) || (u.inherit && keyword(u.inherit));
     // "POSTPONED to 20 Nov at 11 AM": the date and time after the change are the real ones.
     const rev = REVISED.exec(u.text);
     let oldWhen = null;
     if (rev) {
-      const cut = u.s + rev.index;
+      const cut = u.s + rev.index + rev[0].length;
       const after = ud.filter((x) => x.s >= cut);
       if (after.length) {
         const oldD = ud.find((x) => x.s < cut), oldT = ut.find((x) => x.s < cut);
@@ -349,8 +373,13 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
     const prevCtx = ctxDate;
     if (firstDate) ctxDate = firstDate;
 
+    // "No classes on 14 Nov. Classes resume on 16 Nov." says what is not happening; there is nothing to add.
+    if (NO_SESSION.test(u.text)) {
+      result.warnings.push({ level: 'info', span: [u.s, u.e], msg: `Not added to your calendar, because it says nothing is scheduled: "${u.text.slice(0, 90).trim()}"` });
+      continue;
+    }
     // Cancelled items are reported, never added.
-    if (k && CANCEL.test(u.text)) {
+    if ((k || CLASS_WORD.test(u.text)) && CANCEL.test(u.text)) {
       result.warnings.push({ level: 'warn', span: [u.s, u.e], msg: `This part cancels something, so it is not added to your calendar: "${u.text.slice(0, 90).trim()}"` });
       continue;
     }
@@ -406,6 +435,16 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
       if (!kw && hk) { kw = hk; titleInfo.kwSpan = [header.unit.s + hk.i, header.unit.s + hk.i + hk.kw.length]; }
     }
     if (!kw && !ut.length) continue; // a bare date with nothing happening on it
+    if (!titleInfo && u.inherit && kw) {
+      const subject = SUBJECT_ON.exec(u.text)[0];
+      const [prefix] = titleFor(u.inherit, kw).title.split(': ');
+      titleInfo = { title: `${prefix}: ${subject}`, why: `Same kind as the part before it ("${prefix}"); "${subject}" names the subject.`, span: [u.s, u.s + subject.length] };
+    }
+    if (!titleInfo && u.head && kw) {
+      // "Internal tests: Maths on 12 Nov, Physics on 13 Nov": the first item's subject sits after the colon.
+      const c = u.text.indexOf(':'), lead = c > 0 && SUBJECT_ON.exec(u.text.slice(c + 1).trimStart());
+      if (lead) titleInfo = { title: `${cap(u.text.slice(0, c).trim())}: ${lead[0]}`, why: `"${lead[0]}" names the subject after "${u.text.slice(0, c).trim()}".`, span: [u.s + u.text.indexOf(lead[0], c), u.s + u.text.indexOf(lead[0], c) + lead[0].length] };
+    }
     if (!titleInfo && kw) { titleInfo = titleFor(u.text, kw); titleInfo.span = spanOf(titleInfo, u.s, kw); }
     if (!titleInfo) titleInfo = { title: 'Event', why: 'No event word found; please name it.', span: null };
 
@@ -418,7 +457,10 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
 
     // Date: own date, else the last date before it, else the anchor.
     const d = firstDate || prevCtx;
-    if (d) {
+    const wk = weeklyOf(u.text);
+    if (wk) {
+      weeklyDate(ev, wk, ud, result.anchorDate, u.s);
+    } else if (d) {
       ev.date = d.date;
       ev.sources.date = [d.s, d.e];
       ev.why.date = firstDate ? d.why : `No date in this sentence; used the last date mentioned before it (${prettyDate(d.date)}).`;
@@ -489,7 +531,7 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
 
   const subject = subjectOf(text);
   for (const ev of events) {
-    const full = upgradeTitle(ev.title, text, ev.family);
+    const full = upgradeTitle(ev.title, text, ev.family, /^Taken from/.test(ev.why.title));
     if (full !== ev.title) { ev.why.title = `"${ev.title}" is called "${full}" elsewhere in the notice.`; ev.title = full; }
     if (subject && ev.type === 'deadline' && /^(registration|submission|application|payment|upload|form) deadline$/i.test(ev.title)) { ev.title = `${ev.title}: ${subject}`; ev.why.title += ` Named after the notice subject "${subject}".`; }
     if (ev.date && !ev.start) ev.flags.push({ field: 'start', level: 'info', msg: 'No time given; it will be an all-day event.' });
@@ -566,6 +608,38 @@ function setTime(ev, ut, u, text) {
   if (t.hinglish) ev.why.start = `Hinglish time "${t.raw}" = ${fmt12(t.start)}.`;
 }
 
+// "Every Monday and Wednesday 4-5 PM, starting 9 Nov till 20 Dec": one weekly event. `every` is the RRULE BYDAY list,
+// `repeat` the number of times it happens (a notice with no end date gets four weeks, and says so).
+const DAY_WORD = String.raw`(?:sun|mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?)(?:day)?\b`;
+const WEEKLY = new RegExp(String.raw`\b(?:every|each|weekly on)\s+(${DAY_WORD}(?:\s*(?:,|and|&|aur)\s*${DAY_WORD})*)`, 'i');
+const WEEKLY_WEEKS = 4;
+
+function weeklyOf(str) {
+  const m = WEEKLY.exec(str);
+  if (!m) return null;
+  const days = [...new Set(m[1].match(/sun|mon|tue|wed|thu|fri|sat/gi).map((w) => ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(w.toLowerCase())))].sort();
+  return { days, span: [m.index, m.index + m[0].length], raw: m[0] };
+}
+
+function weeklyDate(ev, wk, ud, anchor, base) {
+  const abs = ud.filter((x) => x.kind === 'abs');
+  let first = abs.length ? abs[0].date : addDays(anchor, 1);
+  while (!wk.days.includes(weekdayOf(first))) first = addDays(first, 1);
+  const until = abs.length > 1 ? abs[abs.length - 1].date : null;
+  const dates = [];
+  for (let day = first; dates.length < 60 && (until ? day <= until : dates.length < wk.days.length * WEEKLY_WEEKS); day = addDays(day, 1)) {
+    if (wk.days.includes(weekdayOf(day))) dates.push(day);
+  }
+  const names = wk.days.map((n) => WEEKDAY_NAMES[n].slice(0, 3)).join(' and ');
+  ev.date = first;
+  ev.every = wk.days.map((n) => DAY_CODES[n]).join(',');
+  ev.repeat = dates.length;
+  ev.sources.date = abs.length ? [abs[0].s, abs[0].e] : [base + wk.span[0], base + wk.span[1]];
+  ev.why.date = `"${wk.raw}" repeats weekly; the first one is ${prettyDate(first)}${abs.length ? '' : ' (the next one after the notice)'}.`;
+  if (until) ev.flags.push({ field: 'date', level: 'info', msg: `Every ${names} from ${prettyDate(first)} to ${prettyDate(until)} (${dates.length} times). The calendar file repeats it.` });
+  else ev.flags.push({ field: 'date', level: 'warn', msg: `Every ${names}, but the notice gives no end date. Added for ${WEEKLY_WEEKS} weeks (${dates.length} times) from ${prettyDate(first)}; extend it if the course runs longer.` });
+}
+
 // Several dates in one sentence: "16 and 17 Oct" or "25 Oct to 30 Oct" is one event on every day;
 // anything else is a question for the student, so it is flagged amber.
 function dateSpread(ev, ud, text) {
@@ -623,6 +697,7 @@ function mergeInto(keep, other) {
   if (!keep.venue && other.venue) { keep.venue = other.venue; keep.sources.venue = other.sources.venue; keep.why.venue = other.why.venue; keep.zoom = other.zoom; }
   keep.durationMin = keep.durationMin || other.durationMin;
   keep.repeat = keep.repeat || other.repeat;
+  keep.every = keep.every || other.every;
   keep.reportAt = keep.reportAt || other.reportAt;
 }
 

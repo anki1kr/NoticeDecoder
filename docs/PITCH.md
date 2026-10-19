@@ -39,7 +39,7 @@ Students first. Second, the class representative, who today forwards every notic
 We read the code of seven public notice projects on GitHub in Oct 2026. Most send the notice to Gemini, Gemma or another model and return a summary or a deadline list. None of them exports a calendar file or checks for clashes, and those two are what PS-02 asks for. Two related projects do part of it for other inputs: notice-hub (Chinese QQ groups) gives a calendar subscription without clash checks, and edt-tamis checks university timetable files for exam clashes and exports iCalendar. Neither reads a pasted college notice.
 
 **Why rules and not AI?**
-- The answer is the same every time, so the student can trust it and we can test it (19 engine tests, plus 20 messy notices written by an outside reviewer: 145 of 152 field checks right).
+- The answer is the same every time, so the student can trust it and we can test it (40 engine tests, plus 20 messy notices written by an outside reviewer: 145 of 152 field checks right).
 - Each field shows its reason and its source words, so a wrong result can be seen and fixed.
 - It runs in the browser: no data leaves the phone, no API key, no cost per notice, and the demo works offline.
 - We have not run an AI model on the same notices, so we do not claim AI would score lower. One study of models answering questions about event dates (TRAVELER, 2025) found accuracy drops when the date is vague, which is exactly where we flag instead of guessing.
@@ -69,7 +69,7 @@ Fix spelling of event words ("tset" is not read as a test; months and weekdays w
 Yes, on the device: pdf.js for PDFs with a text layer, Tesseract OCR (the open-source engine) for photos and scans, after cleaning the image up on a canvas. OCR errors are silent, a 3 can become an 8, so every event read from a photo asks for one "Looks right" and shows the words it read. First use downloads the reader once (about 10 MB); after that it works offline. Handwriting is out of scope.
 
 **How did you test it?**
-`node tests/engine.test.mjs` (27 tests), a Playwright run of the full page at phone width (42 checks: decode, edit, delete/undo, copy, share-link round trip, share target, service worker, offline), the .ics files read back with Python's `icalendar` parser, and three reviewer agents acting as judges who wrote their own messy notices. Test notices and expected answers are in `examples/` (six). The 2026-10-15 review found the same-type merge bug (two exams at 10 AM became one card and "No clashes"), one-sentence-two-events, timetables, fractions read as dates and ISO dates; each is now a test.
+`node tests/engine.test.mjs` (40 tests), a Playwright run of the full page at phone width (81 checks: decode, edit, delete/undo, copy, share-link round trip, share target, service worker, offline), the .ics files read back with Python's `icalendar` parser, and three reviewer agents acting as judges who wrote their own messy notices. Test notices and expected answers are in `examples/` (six). The 2026-10-15 review found the same-type merge bug (two exams at 10 AM became one card and "No clashes"), one-sentence-two-events, timetables, fractions read as dates and ISO dates; each is now a test.
 
 ## Money
 

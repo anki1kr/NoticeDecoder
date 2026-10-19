@@ -14,7 +14,7 @@ import { findClashes } from '../../app/engine/clash.js';
 const MAX_EVENTS = 300;
 const MAX_BODY = 64 * 1024;
 const ID_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o/1/l/i
-const EVENT_FIELDS = ['title', 'type', 'typeLabel', 'date', 'start', 'end', 'venue', 'link', 'durationMin', 'repeat', 'point', 'window', 'reportAt', 'cancelled'];
+const EVENT_FIELDS = ['title', 'type', 'typeLabel', 'date', 'start', 'end', 'venue', 'link', 'durationMin', 'repeat', 'every', 'point', 'window', 'reportAt', 'cancelled'];
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', ...cors(), ...extra } });
 const text = (body, status, type, extra = {}) => new Response(body, { status, headers: { 'content-type': type, ...cors(), ...extra } });
@@ -43,6 +43,7 @@ function cleanEvent(x) {
   if (e.link && !/^https?:\/\/\S+$/.test(e.link)) delete e.link;
   e.durationMin = Number(e.durationMin) || undefined;
   e.repeat = Number(e.repeat) || undefined;
+  e.every = /^(?:(?:SU|MO|TU|WE|TH|FR|SA)(?:,|$))+$/.test(e.every) ? e.every : undefined;
   return e;
 }
 
@@ -116,17 +117,23 @@ export async function handle(request, env) {
       if (!incoming.length) return json({ error: 'No events with a title and a date.' }, 400);
       if (body.replace) cls.events = {};
       let added = 0, updated = 0;
+      const stats = cls.stats || (cls.stats = { publishes: 0, revised: 0, cancelled: 0, clashSeen: [] });
+      const when = (e) => `${e.date}|${e.start || ''}|${e.end || ''}`;
       for (const entry of calendarEntries(incoming)) {
-        if (cls.events[entry.uid]) updated++; else added++;
+        const before = cls.events[entry.uid];
+        if (before) { updated++; if (when(before) !== when(entry.event)) stats.revised++; } else added++;
         cls.events[entry.uid] = { ...entry.event, uid: entry.uid, publishedAt: new Date().toISOString() };
       }
+      stats.publishes++;
       const keep = Object.values(cls.events).sort((a, b) => (b.publishedAt || '').localeCompare(a.publishedAt || '')).slice(0, MAX_EVENTS);
       cls.events = Object.fromEntries(keep.map((e) => [e.uid, e]));
       cls.updatedAt = new Date().toISOString();
-      await env.CLASSES.put(classKey(m[1]), JSON.stringify(cls));
       const live = Object.values(cls.events).filter((e) => !e.cancelled).map((e) => ({ ...e, id: e.uid }));
       const byId = new Map(live.map((e) => [e.id, e]));
       const clashes = findClashes(live).filter((c) => c.kind !== 'none').map((c) => ({ a: byId.get(c.a).title, b: byId.get(c.b).title, date: byId.get(c.a).date, msg: c.msg, action: c.action }));
+      // Every clash pair is counted once, the first time a publish shows it: "clashes the class heard about before the date".
+      stats.clashSeen = [...new Set([...stats.clashSeen, ...clashes.map((c) => `${c.a}|${c.b}|${c.date}`)])].slice(-500);
+      await env.CLASSES.put(classKey(m[1]), JSON.stringify(cls));
       return json({ id: m[1], added, updated, count: live.length, clashes, feed: `${url.origin}/c/${m[1]}.ics`, page: `${url.origin}/c/${m[1]}` });
     }
 
@@ -140,7 +147,10 @@ export async function handle(request, env) {
       const live = all.filter((e) => !e.cancelled);
       const byId = new Map(live.map((e) => [e.id, e]));
       const clashes = findClashes(live).filter((c) => c.kind !== 'none').map((c) => ({ a: byId.get(c.a).title, b: byId.get(c.b).title, date: byId.get(c.a).date, msg: c.msg, action: c.action }));
-      return json({ id: m[1], name: cls.name, updatedAt: cls.updatedAt, events: all, clashes, feed: `${url.origin}/c/${m[1]}.ics`, page: `${url.origin}/c/${m[1]}` });
+      // What a pilot is judged on: notices published, events live, revisions pushed, clashes reported, cancellations.
+      const s = cls.stats || {};
+      const stats = { publishes: s.publishes || 0, events: live.length, revised: s.revised || 0, cancelled: s.cancelled || 0, clashesFound: (s.clashSeen || []).length, since: cls.createdAt };
+      return json({ id: m[1], name: cls.name, updatedAt: cls.updatedAt, events: all, clashes, stats, feed: `${url.origin}/c/${m[1]}.ics`, page: `${url.origin}/c/${m[1]}` });
     }
 
     // Cancel one event
@@ -151,6 +161,7 @@ export async function handle(request, env) {
       if (!(await authed(request, cls))) return json({ error: 'Wrong or missing class secret.' }, 401);
       const uid = decodeURIComponent(m[2]);
       if (!cls.events[uid]) return json({ error: 'No such event.' }, 404);
+      if (!cls.events[uid].cancelled) (cls.stats || (cls.stats = { publishes: 0, revised: 0, cancelled: 0, clashSeen: [] })).cancelled++;
       cls.events[uid] = { ...cls.events[uid], cancelled: true, publishedAt: new Date().toISOString() };
       cls.updatedAt = new Date().toISOString();
       await env.CLASSES.put(classKey(m[1]), JSON.stringify(cls));

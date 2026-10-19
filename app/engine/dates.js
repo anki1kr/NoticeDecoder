@@ -37,6 +37,17 @@ export function localISO(date) {
 
 // 0 = Sunday ... 6 = Saturday, for an ISO date.
 export const weekdayOf = (isoDate) => new Date(`${isoDate}T00:00:00Z`).getUTCDay();
+export const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+// The dates an event happens on: `repeat` days in a row, or, with `every` ("MO,WE"), `repeat` times on those weekdays.
+export function occurrences(e) {
+  const n = Math.max(1, Math.min(Number(e.repeat) || 1, 60));
+  if (!e.every) return Array.from({ length: Math.min(n, 31) }, (_, k) => addDays(e.date, k));
+  const days = e.every.split(',').map((c) => DAY_CODES.indexOf(c));
+  const out = [];
+  for (let d = e.date; out.length < n && out.length < 366; d = addDays(d, 1)) if (days.includes(weekdayOf(d))) out.push(d);
+  return out;
+}
 
 function validDate(y, m, d) {
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -108,12 +119,17 @@ function findDatesIn(text) {
     if (NOT_A_DATE_BEFORE.test(text.slice(Math.max(0, s - 24), s)) || NOT_A_DATE_AFTER.test(text.slice(e, e + 12))) continue;
     push({ kind: 'abs', s, e, d: a, m: b, y: null, raw: m[0], numeric: true, ambiguous: a <= 12 && a !== b });
   }
-  // "16 and 17 Oct": the first day borrows the month and year of the second.
-  for (const tok of out.filter((x) => x.kind === 'abs' && !x.numeric && !x.isoForm)) {
-    const before = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:and|&|,|aur|व|और)\s*$/i.exec(text.slice(Math.max(0, tok.s - 14), tok.s));
+  // "16 and 17 Oct", "1-2 Nov", "5th & 6th Dec", "8, 9 and 10 Nov": each day borrows the month and year of the next.
+  const lists = out.filter((x) => x.kind === 'abs' && !x.numeric && !x.isoForm);
+  for (let i = 0; i < lists.length; i++) {
+    const tok = lists[i];
+    const before = /(\d{1,2})((?:st|nd|rd|th)?)\s*(?:and|&|,|aur|व|और|-|–|—|to|till|until)\s*$/i.exec(text.slice(Math.max(0, tok.s - 16), tok.s));
     if (!before) continue;
-    const s = tok.s - before[0].length, e = s + before[1].length;
-    if (free(s, e)) push({ kind: 'abs', s, e, d: +before[1], m: tok.m, y: tok.y, raw: before[1] });
+    const s = tok.s - before[0].length, e = s + before[1].length + before[2].length;
+    if (!free(s, e)) continue;
+    const day = { kind: 'abs', s, e, d: +before[1], m: tok.m, y: tok.y, raw: before[1] };
+    push(day);
+    lists.push(day);
   }
   const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   for (const m of text.matchAll(/\b(?:(next|this|coming)\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)\b/gi)) {

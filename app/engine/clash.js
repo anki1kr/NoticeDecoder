@@ -1,7 +1,7 @@
 // Clash rules from the problem statement:
 // two events clash when each starts before the other ends; a deadline (or any "by" time) is a point
 // and clashes when it falls inside another event.
-import { toMin, fromMin, fmt12, addDays, prettyDate } from './dates.js';
+import { toMin, fromMin, fmt12, occurrences, prettyDate } from './dates.js';
 
 // A deadline or a "by 9 PM" time is a point. Any other event without an end lasts its duration, or 1 hour,
 // the same length the calendar file and the timeline use.
@@ -36,8 +36,7 @@ export function findClashes(events) {
   const timed = [];
   for (const e of events) {
     if (!e.date || !e.start) continue;
-    const days = Math.max(1, Math.min(Number(e.repeat) || 1, 31));
-    for (let k = 0; k < days; k++) timed.push(k === 0 ? e : { ...e, date: addDays(e.date, k), _day: k + 1 });
+    occurrences(e).forEach((date, k) => timed.push(k === 0 ? e : { ...e, date, _day: k + 1 }));
   }
   const rows = [];
   for (let i = 0; i < timed.length; i++) {

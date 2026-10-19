@@ -53,7 +53,7 @@ export function localDate(s) {
 
 // Same payload the web app's "Share with class" and the Gmail script use (app.js shareUrl, version 1).
 export function sharePayload(events) {
-  const payload = { v: 1, on: new Date().toISOString().slice(0, 10), e: events.map((ev) => ({ t: ev.title, k: ev.type, d: ev.date, s: ev.start, e: ev.end, v: ev.venue, l: ev.link, m: ev.durationMin, r: ev.repeat, p: ev.point ? 1 : 0, w: ev.window ? 1 : 0 })) };
+  const payload = { v: 1, on: new Date().toISOString().slice(0, 10), e: events.map((ev) => ({ t: ev.title, k: ev.type, d: ev.date, s: ev.start, e: ev.end, v: ev.venue, l: ev.link, m: ev.durationMin, r: ev.repeat, y: ev.every, p: ev.point ? 1 : 0, w: ev.window ? 1 : 0 })) };
   const json = JSON.stringify(payload);
   const bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(json) : Uint8Array.from(unescape(encodeURIComponent(json)), (c) => c.charCodeAt(0));
   let bin = '';

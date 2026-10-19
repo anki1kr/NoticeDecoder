@@ -128,7 +128,7 @@ function shareLink(events) {
   const payload = {
     v: 1,
     on: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd'),
-    e: events.map((ev) => ({ t: ev.title, k: ev.type, d: ev.date, s: ev.start, e: ev.end, v: ev.venue, l: ev.link, m: ev.durationMin, r: ev.repeat, p: ev.point ? 1 : 0, w: ev.window ? 1 : 0 })),
+    e: events.map((ev) => ({ t: ev.title, k: ev.type, d: ev.date, s: ev.start, e: ev.end, v: ev.venue, l: ev.link, m: ev.durationMin, r: ev.repeat, y: ev.every, p: ev.point ? 1 : 0, w: ev.window ? 1 : 0 })),
   };
   const b64 = Utilities.base64EncodeWebSafe(Utilities.newBlob(JSON.stringify(payload)).getBytes()).replace(/=+$/, '');
   return CONFIG.appUrl + '#s=' + b64;

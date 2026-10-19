@@ -34,7 +34,7 @@ ids into every file, `node tools/smoke-live.mjs` checks the live site). Still ma
 2. **Events** come out with title, type (test / deadline / lecture / other), date, start and end time, and venue.
 3. **Every field shows why** ("`by 12:00 noon` = must happen by 12:00 PM") and **"Show in notice"** highlights the exact words it came from.
 4. **Check only what is uncertain.** Fields the rules are sure of say "Nothing to check"; uncertain ones are outlined in amber with the question to answer, and nothing can be exported until each one is fixed or marked "Looks right". Every field is editable and clashes update as you type.
-5. **Clashes** on a timeline, in plain words, with a suggested action. Two events clash when each starts before the other ends; a deadline is a point in time and clashes when it falls inside another event.
+5. **Clashes** on a timeline, in plain words, with a suggested action. Two events clash when each starts before the other ends; a deadline is a point in time and clashes when it falls inside another event. Events you already added from this browser are kept on the device and checked against every new notice ("already in your calendar"); one button clears them.
 6. **Add to Google Calendar** with one tap per event, or **download .ics** for all of them (Google, Outlook, Apple) with reminders by event type.
 7. **Share with the class.** *Copy summary* gives a plain-text digest for the group. *Share with class* puts the reviewed events inside a link (no server, nothing stored): whoever opens it sees the same cards, the clash check and the one-tap calendar buttons. *Send on WhatsApp* opens the share sheet with both.
 
@@ -58,6 +58,13 @@ The closest tools we found (ScreenToCal, and a notice-to-calendar project from a
 | No end time, no AM/PM, no year | Filled with a clearly flagged assumption, never silently |
 | Two exams at 10 AM on the same day | Two events and a **clash**, not one merged card (a bug fixed 2026-10-15: same-type events used to merge) |
 | "Internal Test at 10 AM in Room 204 and a guest lecture at 11 AM" | One sentence, **two events** |
+| "Maths on 12 Nov at 10 AM, Physics on 13 Nov at 10 AM and Chemistry on 14 Nov at 10 AM" | **Three events**, each named by its subject ("Internal tests: Physics") |
+| "Deadline extended from 15/11/2026 to 22/11/2026 5 PM" | Takes the **new** date and keeps "It was 15 Nov" as a note |
+| "1-2 Nov", "5th & 6th Dec", "8, 9 and 10 Nov", "exams commence 10 Nov and end on 18 Nov" | One multi-day event; the clash check runs on every day |
+| "Every Monday and Wednesday 4-5 PM, starting 9 Nov" | A **weekly** event (`RRULE:FREQ=WEEKLY;BYDAY=MO,WE`). With no end date it adds four weeks and asks, never an endless series |
+| "Aaj wali class cancel hai", "no classes on 14 Nov" | Reported, **never added** to the calendar |
+| "Mr. Sharma sir ka extra class hoga Room 12 me" | An "Extra class" in Room 12: "Mr." does not end the sentence, Hinglish place words are read |
+| MST-2, CIE-1, CAT-2 | Exam acronyms are tests and keep their number |
 | A timetable: `13 Nov 2026 - DBMS - 10 AM to 1 PM - Room 101` per line | Each row is an exam named by its subject, kind from the header line, room from the cell |
 | "Thursday, 13 Nov 2026" when 13 Nov is a Friday | **Asks which one is right** instead of picking silently |
 | An exam on Diwali, or on a Sunday | Flags the gazetted holiday (`app/engine/holidays.js`, editable per college); notes the Sunday |
@@ -76,6 +83,7 @@ AI is not needed for any of this, so results are the same every time, cost nothi
 - **Departments: yearly plan for "Publish to class"**, proposed at ₹2,999 per department per year, free for a first pilot term. The free version of this already works: the CR decodes once and shares a link that carries the events (no server). The paid plan is the hosted version of that link: one subscription calendar per class that **updates itself** when a revised notice is published, with clash checks across every notice of the term. The CR or a teacher is the daily user; the HOD signs off from the department budget. Today a class representative forwards every notice by hand. APSIT Mumbai moved notices out of WhatsApp groups in Sep 2025 because many students missed them, and Jamia (Sep 2026) now routes academic notices through official CR-run class groups. With the licence, a faculty member or CR decodes a notice once and the whole class subscribes to one calendar link. A full college ERP such as Fedena lists $999-1,699 a year, so a single-purpose add-on can be priced well below that.
 - **Student extras (later):** photo/PDF reading, WhatsApp reminders (each message has a cost, so it is a paid feature).
 - **Cost to run:** the rules run on the student's phone, so each notice costs us about nothing; hosting fits a free static tier.
+- **The pilot is measurable:** the class console shows notices published, events live, events revised, events cancelled and clashes reported before the date, straight from what the class published. The terms are on `app/pilot.html` ("For departments" in the app footer).
 - Honest status: no college has paid yet; the next step is a one-department pilot.
 
 Sources: [APSIT e-notice board post, 23 Sep 2025](https://elearn.apsit.edu.in/moodle/mod/forum/discuss.php?d=65) ·
@@ -91,7 +99,7 @@ No install, no build. Serve the `app` folder with any static server:
 npx serve app        # or: python -m http.server 8000 --directory app
 ```
 
-Tests (Node 18+): `node tests/engine.test.mjs` (32 engine tests), `node worker/test/feed.test.mjs` (9), `node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs` (7), `cd companion && npm test` (5). Browser check of the whole page, the share link, the share target and offline mode: start the server, then `node tools/ui-check.mjs` (Playwright, 73 checks, 77 with `OCR_CHECKS=1` which downloads the OCR model once; `PLAYWRIGHT_DIR` may point at any project that has Playwright installed). Test notices with expected results live in `examples/` (six, including an exam timetable, two same-hour tests and a Hindi notice).
+Tests (Node 18+): `node tests/engine.test.mjs` (40 engine tests), `node worker/test/feed.test.mjs` (10), `node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs` (7), `cd companion && npm test` (5). Browser check of the whole page, the share link, the share target and offline mode: start the server, then `node tools/ui-check.mjs` (Playwright, 81 checks, 85 with `OCR_CHECKS=1` which downloads the OCR model once; `PLAYWRIGHT_DIR` may point at any project that has Playwright installed). Test notices with expected results live in `examples/` (six, including an exam timetable, two same-hour tests and a Hindi notice).
 
 ## Code map
 

@@ -4,8 +4,8 @@
 //   Google Cloud console -> APIs & Services -> Credentials -> Create credentials -> OAuth client ID
 //   -> Web application; Authorised JavaScript origins: https://anki1kr.me and http://127.0.0.1:8771
 //   (no redirect URIs: the page uses the Google Identity Services token flow).
-//   Enable "Google Calendar API" for the project. On the OAuth consent screen, Testing mode is enough
-//   for the hackathon: add the team's and judges' Google accounts as test users (limit 100).
+//   Enable "Google Calendar API" for the project. The scope is calendar.app.created (non-sensitive), so publish the
+//   OAuth consent screen "In production": no test-user list and no unverified-app screen.
 // Leave it empty and the button explains what is missing instead of failing.
 export const GOOGLE_CLIENT_ID = '1048623925742-fu9isnfo2ueuj3o77jgp9sej4ou2upub.apps.googleusercontent.com';
 
