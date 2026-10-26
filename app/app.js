@@ -865,7 +865,8 @@ function renderDay(iso, evs, clashes) {
   }
   return el('div', { class: 'tl-day' },
     el('h3', { class: 'tl-day-title' }, fmtDate(iso)),
-    el('div', { class: 'tl-scroll' }, body));
+    // Focusable and named: on a phone the timeline scrolls sideways, and keyboard / screen-reader users must reach it too.
+    el('div', { class: 'tl-scroll', tabindex: '0', role: 'region', 'aria-label': `Timeline for ${fmtDate(iso)}, scrolls sideways` }, body));
 }
 
 function clashRow(c, byId) {
