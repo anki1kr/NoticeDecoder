@@ -14,9 +14,10 @@
   --accent-soft: #efecfa;
   --serif: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
-  --red: #dc2626;
-  --green: #15803d;
-  --amber: #b45309;
+  /* Status inks clear 4.5:1 on the grey page too, not only on cards (status lines sit on both) */
+  --red: #b91c1c;
+  --green: #166534;
+  --amber: #92400e;
   --radius: 12px;
 }
 
@@ -33,7 +34,8 @@ body {
 
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
-.wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 var(--gutter); }
+:root { --gutter: clamp(12px, 4vw, 32px); --pad: clamp(12px, 3.5vw, 20px); --stack: 16px; }
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap;
@@ -53,26 +55,26 @@ h2 { font-size: 1.25rem; margin: 0 0 8px; }
 .small { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 
 main.wrap { padding-top: 8px; padding-bottom: 24px; }
-main > section, main > div, .card { margin-top: 16px; }
+/* One vertical rhythm: every block in the page and in the results is one stack step below the last. */
+main > *, #results > * { margin-top: var(--stack); }
 
 /* Cards */
 .card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 16px;
+  padding: var(--pad);
 }
-.hint { color: var(--muted); font-size: 14px; margin: 4px 0 10px; }
+.hint { color: var(--muted); font-size: 14px; margin: 4px 0 10px; max-width: 72ch; }
 .lbl { display: block; font-weight: 600; font-size: 14px; margin: 0 0 6px; }
 .error { color: var(--red); font-weight: 600; font-size: 15px; margin: 8px 0 0; }
 
 /* Buttons and inputs */
 .btn {
-  min-height: 44px; padding: 10px 16px; border-radius: 10px;
-  border: 1px solid #8b93a1; background: var(--card); color: var(--text);
+  min-height: 44px; padding: 10px 16px; border-radius: 6px;
+  border: 1px solid #8f8aa6; background: var(--card); color: var(--text);
   font: inherit; font-weight: 600; cursor: pointer;
 }
-.btn { border-radius: 6px; border-color: #8f8aa6; }
 .btn:hover:not(:disabled) { background: var(--accent-soft); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
@@ -117,9 +119,9 @@ input, select { min-height: 44px; }
 
 /* Notice panel with highlighted sources */
 .notice-text {
-  font-family: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+  font-family: var(--serif);
   white-space: pre-wrap; overflow-wrap: anywhere; font-size: 17px; line-height: 1.75;
-  max-height: 28rem; overflow: auto; padding: 20px 18px 24px; border-radius: 2px; background: var(--paper);
+  max-height: 28rem; overflow: auto; padding: 16px clamp(12px, 4vw, 18px) 24px; border-radius: 2px; background: var(--paper);
   box-shadow: 0 1px 1px rgba(29, 27, 38, .06), 0 10px 24px -14px rgba(29, 27, 38, .35);
   scrollbar-color: #b9b2d9 transparent;
 }
@@ -167,11 +169,13 @@ mark.pulse { outline: 3px solid var(--strong); outline-offset: 2px; }
 }
 .head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .gcal { display: inline-flex; align-items: center; text-decoration: none; }
-.check-line { margin: 0 0 12px; font-size: 14px; color: #78350f; font-weight: 600; }
+.check-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 14px; color: #78350f; font-weight: 600; }
 .check-line.ok { color: var(--green); }
-.check-line .confirm { margin-left: 8px; vertical-align: middle; }
 .needs-check input, .needs-check select { border-color: var(--amber); box-shadow: 0 0 0 2px #fcd34d; }
-.fields { display: grid; gap: 12px 10px; grid-template-columns: 1fr 1fr; }
+/* Fields follow the card's own width, not the screen's: one column on a narrow phone, two once a date fits. */
+.card.ev { container-type: inline-size; }
+.fields { display: grid; gap: 12px 10px; grid-template-columns: 1fr; }
+@container (min-width: 340px) { .fields { grid-template-columns: 1fr 1fr; } }
 .field { min-width: 0; }
 .field.wide { grid-column: 1 / -1; }
 .why { font-size: 13px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
@@ -241,22 +245,46 @@ th { font-size: 14px; color: var(--muted); }
 
 /* Export */
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 16px; }
-.check input { width: 20px; height: 20px; min-height: 20px; margin: 0; }
+.check input { flex: none; width: 24px; height: 24px; min-height: 24px; margin: 0; }
 .status { min-height: 1.5em; margin: 12px 0 0; font-weight: 600; }
 .status[data-kind="error"] { color: var(--red); }
 .status[data-kind="ok"] { color: var(--green); }
 
-.foot { color: var(--muted); font-size: 14px; padding: 16px 16px 40px; }
-.foot p { border-top: 1px solid var(--line); padding-top: 14px; margin: 0; }
+.foot { color: var(--muted); font-size: 14px; padding-top: 16px; padding-bottom: 40px; }
+.foot p { border-top: 1px solid var(--line); padding-top: 14px; margin: 0; max-width: 72ch; }
+.foot a { display: inline-block; padding: 4px 0; }
 
-/* Wider phones and tablets */
-@media (min-width: 520px) {
-  .fields { grid-template-columns: 1fr 1fr; }
+/* Narrow phones: a row of buttons shares the width instead of leaving ragged gaps */
+@media (max-width: 519px) {
+  .actions > .btn { flex: 1 1 auto; }
 }
+
+/* Tablets and up */
 @media (min-width: 820px) {
   h1 { font-size: 2.1rem; }
-  .events { grid-template-columns: 1fr 1fr; }
   .site-head { padding-top: 40px; }
+}
+#events-section { container-type: inline-size; }
+@container (min-width: 720px) { .events { grid-template-columns: 1fr 1fr; } }
+
+/* Desktop: the notice stays beside the results, so a highlight and its card are on screen together. */
+@media (min-width: 1080px) {
+  .wrap { max-width: 1320px; }
+  #results:not([hidden]) {
+    display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); column-gap: 24px; align-items: start;
+  }
+  #results > * { grid-column: 2; }
+  #results > #notice-card {
+    grid-column: 1; grid-row: 1 / span 20; position: sticky; top: 16px;
+    max-height: calc(100vh - 32px); display: flex; flex-direction: column;
+  }
+  #notice-card .notice-text { max-height: none; flex: 1 1 auto; min-height: 0; }
+}
+
+/* Windows high contrast: colours are replaced, so highlights and bars keep an outline */
+@media (forced-colors: active) {
+  mark, .badge, .tl-bar, .dot { outline: 1px solid CanvasText; }
+  .tl-band { outline: 1px dashed CanvasText; }
 }
 
 /* Browser surfaces */
@@ -294,7 +322,7 @@ a, .link { text-underline-offset: 3px; }
 .row-actions { display: flex; gap: 8px; margin-left: auto; }
 .row-actions .link { padding: 4px 6px; font-size: 14px; }
 .row .badge { font-size: 13px; }
-@media (min-width: 820px) { .events .row { grid-column: 1 / -1; } }
+@container (min-width: 720px) { .events .row { grid-column: 1 / -1; } }
 
 /* Files: drop target, read status, Hindi toggle */
 #input-card.drop { outline: 3px dashed var(--accent); outline-offset: -6px; background: var(--accent-soft); }
@@ -309,6 +337,7 @@ a, .link { text-underline-offset: 3px; }
 #class-console-list li { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .console-clash { color: #78350f; }
 .console-cancelled { color: var(--muted); text-decoration: line-through; }
+#class-open-row { margin-top: 16px; }
 .join-row { align-items: stretch; }
 .join-row input { flex: 1 1 220px; }
 #class-section .lbl { margin-top: 16px; }

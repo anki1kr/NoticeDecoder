@@ -444,4 +444,19 @@ test('A deadline inside a lecture with no end time is a clash (it used to crash 
   assert.match(row.action, /before 11:00 AM/);
 });
 
+test('Poster photo: the weekday over a written date names that date, and a column gap before "Room 208" is a place', () => {
+  // OCR of the real IIC poster (date, venue and timing panels side by side; the steps row ends in "Code | Build | Test")
+  const ocr = 'Observe  Discuss  Find Think  Build  Showca:  Evaluate  Choose  Move  Code  Build  Test Supper  Mentor  Grow Wednesday  VENUE  Ox  TIMING\n28 October 2026  Room 208  2:20 PM';
+  const r = parseNotice(ocr, { pastedAt, source: 'photo' });
+  assert.equal(r.events.length, 1);
+  assert.deepEqual([r.events[0].date, r.events[0].start, r.events[0].venue], ['2026-10-28', '14:20', 'Room 208']);
+  // a weekday on its own, or one a sentence away from a date, still is its own day
+  assert.equal(parseNotice('Unit test on Wednesday at 10 AM in Lab 2.', { pastedAt }).events[0].date, '2026-10-21');
+  const two = parseNotice('Quiz on Wednesday. Form due 28 October 2026 by 5 PM.', { pastedAt }).events;
+  assert.equal(two.find((e) => e.type === 'test').date, '2026-10-21');
+  // with the poster's name read too, the unnamed event takes it
+  const [named] = parseNotice(`Activity\n(Q-, Smart Campus Innovation Challenge\n${ocr}`, { pastedAt, source: 'photo' }).events;
+  assert.equal(named.title, 'Smart Campus Innovation Challenge');
+});
+
 console.log(`\n${passed} passed`);

@@ -655,17 +655,20 @@ function buildField(ev, card, spec) {
       inputmode: spec.type === 'number' ? 'numeric' : null, placeholder: spec.key === 'link' ? 'https://' : null,
       maxlength: { title: MAX_TITLE, venue: 120, link: 500 }[spec.key] || null,
     });
+  control.setAttribute('aria-describedby', whyId(ev, spec.key)); // screen readers hear the reason with the field
   control.addEventListener('input', () => onEdit(ev, card, spec.key, control.value));
   return el('div', { class: spec.wide ? 'field wide' : 'field', dataset: { field: spec.key } },
     el('label', {}, el('span', { class: 'lbl' }, spec.label), control),
     buildWhy(ev, spec.key));
 }
 
+const whyId = (ev, field) => `why-${ev.id}-${field}`.replace(/[^\w-]/g, '_');
+
 // The "why" line under a field, with a jump to the highlighted source when one exists.
 function buildWhy(ev, field) {
   const reason = ev.why?.[field];
   const hasSource = Array.isArray(ev.sources?.[field]) && state.decodedText;
-  return el('div', { class: 'why', dataset: { why: field } },
+  return el('div', { class: 'why', id: whyId(ev, field), dataset: { why: field } },
     reason ? `why: ${reason}` : null,
     hasSource ? el('button', {
       type: 'button',
@@ -1180,16 +1183,21 @@ const appLink = () => `${location.origin}${location.pathname}`;
 
 async function feedCall(method, path, { body, token } = {}) {
   let res;
+  const call = (cache) => timedFetch(`${feedBase()}${path}`, {
+    method,
+    cache,
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
   try {
-    res = await timedFetch(`${feedBase()}${path}`, {
-      method,
-      // Always ask the server (it answers 304 when nothing changed): a class reopened a minute after the CR moved a test
-      // must show the move, not the browser's 5-minute copy.
-      cache: 'no-cache',
-      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch (err) { throw new Error(friendlyNet(err)); }
+    // Always ask the server (it answers 304 when nothing changed): a class reopened a minute after the CR moved a test
+    // must show the move, not the browser's 5-minute copy.
+    res = await call('no-cache');
+  } catch (err) {
+    // Offline: no-cache cannot revalidate, so a GET falls back to the browser's copy (a class opened before still opens).
+    if (method !== 'GET') throw new Error(friendlyNet(err));
+    try { res = await call('force-cache'); } catch { throw new Error(friendlyNet(err)); }
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || `The class server said ${res.status}.`), { status: res.status });
   return data;

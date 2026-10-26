@@ -68,6 +68,21 @@ export function preprocess(canvas) {
   return out;
 }
 
+// Event posters put the date, time and venue in panels side by side, often light text on dark. Read as one block of
+// text those panels merge into noise (the IIC poster gave "2 October" and "Room 205"); Tesseract's own layout analysis
+// (page segmentation mode 3) reads them as "28 October 2026  Room 208  2:20 PM". A paper notice is mostly white after
+// preprocess, so a picture with a lot of dark in it is treated as a poster.
+const DARK_SHARE = 0.2;
+const PSM_AUTO = '3';
+const SURE = 75;
+const squash = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+export function darkShare(canvas) {
+  const d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data;
+  let dark = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] < 90) dark++;
+  return dark / (d.length / 4);
+}
+
 // A promise that gives up after `ms` with a message the student can act on.
 function within(promise, ms, message) {
   let timer;
@@ -98,10 +113,26 @@ export async function ocrImage(src, { hindi = false, onProgress } = {}) {
     throw new Error(/too long/.test(err?.message) ? err.message : 'The text reader could not download its language data (offline or a weak connection?). Try once with internet; after that it works offline.');
   }
   try {
-    await worker.setParameters({ preserve_interword_spaces: '1' });
-    const { data } = await within(worker.recognize(canvas, {}, { blocks: true }), READ_TIMEOUT_MS, 'Reading this picture took too long. Crop it to the notice and try again.');
-    const lines = [];
-    for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) lines.push({ text: l.text.replace(/\s+$/, ''), confidence: l.confidence });
+    // debug_file: the layout pass prints "Estimating resolution" and "Detected N diacritics" to the console otherwise
+    await worker.setParameters({ preserve_interword_spaces: '1', debug_file: '/dev/null' });
+    const slow = 'Reading this picture took too long. Crop it to the notice and try again.';
+    const read = async () => {
+      const { data } = await within(worker.recognize(canvas, {}, { blocks: true }), READ_TIMEOUT_MS, slow);
+      const lines = [];
+      for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) lines.push({ text: l.text.replace(/\s+$/, ''), confidence: l.confidence });
+      return { data, lines };
+    };
+    let { data, lines } = await read();
+    if (darkShare(canvas) > DARK_SHARE) {
+      // Poster: the layout pass gives the dates and times. The first pass may still hold a banner the layout pass
+      // skipped (the event's name); keep only its sure lines with no digits, so it can add a name, never a date or time.
+      const first = lines;
+      await worker.setParameters({ tessedit_pageseg_mode: PSM_AUTO });
+      ({ data, lines } = await read());
+      const seen = squash(lines.map((l) => l.text).join(' '));
+      const names = first.filter((l) => l.confidence >= SURE && !/\d/.test(l.text) && squash(l.text).length > 3 && !seen.includes(squash(l.text)));
+      lines = [...names, ...lines];
+    }
     const text = lines.length ? lines.map((l) => l.text).join('\n') : data.text;
     const lowLines = lines.filter((l) => l.confidence < LOW_CONFIDENCE && l.text.trim().length > 3);
     return { text, confidence: data.confidence, lowLines, lang };

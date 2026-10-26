@@ -40,7 +40,8 @@ const GENERIC = new Set('event events test tests exam exams quiz deadline lectur
 // Hindi function words that never name an event.
 const HINDI_STOP = 'की का के को में पर से और है हैं होगी होगा होंगे एवं तथा या कि'.split(' ');
 // Place words. Indian campuses also say "LT-3" (lecture theatre), "CR-2" (classroom), "Lab-II", "Block A-204", "SH 1".
-const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*)((?:[A-Za-z]+\s+){0,2}?(?:(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b(?:-?\d{1,3})?|\s*(?:no\.?\s*)?[A-Z]?-?(?:\d{1,4}[A-Za-z]?|[IVX]{1,4}))?|(?:LT|CR|SH|LH|TH)[- ]?(?:\d{1,3}|[IVX]{1,4})\b))\b/i;
+// A wide gap counts as a separator too: posters set date, place and time in columns ("28 October 2026  Room 208  2:20 PM").
+const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*|\S {2,})((?:[A-Za-z]+\s+){0,2}?(?:(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b(?:-?\d{1,3})?|\s*(?:no\.?\s*)?[A-Z]?-?(?:\d{1,4}[A-Za-z]?|[IVX]{1,4}))?|(?:LT|CR|SH|LH|TH)[- ]?(?:\d{1,3}|[IVX]{1,4})\b))\b/i;
 // Hinglish puts the place first: "Room 12 me", "Lab 3 mein".
 const HINGLISH_PLACE = /\b((?:room|hall|lab|auditorium|block|classroom|library|seminar hall)\s*(?:no\.?\s*)?[A-Z]?-?\d{1,4}[A-Za-z]?)\s+(?:me|mein|mai|mei)\b/i;
 const ONLINE = /\b(zoom|google meet|ms teams|microsoft teams|webex|youtube live)\b/i;
@@ -234,7 +235,7 @@ function upgradeTitle(title, text, fam, spoken = true) {
     if (best !== title) break;
   }
   // A bare "Event" is called what the rest of the notice calls it ("Hackathon registration closes ... Event on 1-2 Nov").
-  const named = spoken && best === title && /^(?:event|programme?)$/i.test(title) && /\b(hackathon|fest|competition|contest|tournament|workshop|seminar|webinar|conference|symposium|orientation|convocation)\b/i.exec(text);
+  const named = spoken && best === title && /^(?:event|programme?)$/i.test(title) && /\b(hackathon|fest|competition|contest|tournament|workshop|seminar|webinar|conference|symposium|orientation|convocation|challenge)\b/i.exec(text);
   if (named) {
     const t = walkTitle(text, named.index, named[0], true);
     if (t.split(' ').length <= 4) best = cap(t);
@@ -345,6 +346,17 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
     }
     d.date = addDays(result.anchorDate, d.offset);
     d.why = d.offset === 0 ? `"${d.raw}" = ${anchorWhy}.` : `"${d.raw}" = ${d.offset} day${d.offset > 1 ? 's' : ''} after ${anchorWhy}.`;
+  }
+
+  // "Wednesday  VENUE  TIMING / 28 October 2026": a weekday just before a written date of that same weekday is the
+  // date's name (posters, letters), not a day of its own. A sentence end or a time in between keeps them apart.
+  for (let i = dates.length - 1; i >= 0; i--) {
+    const d = dates[i];
+    if (d.kind !== 'rel' || d.weekday === undefined) continue;
+    const next = dates.find((x) => x.kind === 'abs' && x.s >= d.e);
+    const gap = next ? text.slice(d.e, next.s) : '';
+    if (next && gap.length <= 40 && !/[.!?]/.test(gap) && (gap.match(/\n/g) || []).length <= 1
+      && !times.some((t) => t.s >= d.e && t.e <= next.s) && weekdayOf(next.date) === d.weekday) dates.splice(i, 1);
   }
 
   // 3. One candidate event per unit that has a date or time and something to call it.
@@ -535,7 +547,8 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
 
   const subject = subjectOf(text);
   for (const ev of events) {
-    const full = upgradeTitle(ev.title, text, ev.family, /^Taken from/.test(ev.why.title));
+    // An event with no event word at all (a poster's date line) is named the same way as one called "Event".
+    const full = upgradeTitle(ev.title, text, ev.family, /^Taken from|^No event word/.test(ev.why.title));
     if (full !== ev.title) { ev.why.title = `"${ev.title}" is called "${full}" elsewhere in the notice.`; ev.title = full; }
     if (subject && ev.type === 'deadline' && /^(registration|submission|application|payment|upload|form) deadline$/i.test(ev.title)) { ev.title = `${ev.title}: ${subject}`; ev.why.title += ` Named after the notice subject "${subject}".`; }
     if (ev.date && !ev.start) ev.flags.push({ field: 'start', level: 'info', msg: 'No time given; it will be an all-day event.' });
