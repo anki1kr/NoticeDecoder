@@ -192,7 +192,9 @@ export async function handle(request, env, { newId } = {}) {
         return text(ics, 200, 'text/calendar; charset=utf-8', { ...cache, 'content-disposition': `inline; filename="${id}.ics"` });
       }
       if (kind === '.json') return json({ id, name: cls.name, updatedAt: cls.updatedAt, events, changes: publicChanges(cls), clashes: clashReport(cls, today), today }, 200, cache);
-      return text(subscribePage({ cls, id, origin: url.origin, appUrl: env.APP_URL, today, clashes: clashReport(cls, today), changes: publicChanges(cls) }), 200, 'text/html; charset=utf-8', { ...cache, 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
+      // The page a student reopens after the CR changed something: at most a minute old (the feeds keep 5 minutes; the
+      // app revalidates them every time, and calendars poll on their own schedule).
+      return text(subscribePage({ cls, id, origin: url.origin, appUrl: env.APP_URL, today, clashes: clashReport(cls, today), changes: publicChanges(cls) }), 200, 'text/html; charset=utf-8', { ...cache, 'cache-control': 'public, max-age=60', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
     }
 
     if (path === '/' || path === '/health') return json({ ok: true, service: 'notice-decoder-feed', ai: Boolean(env.ANTHROPIC_API_KEY), maxEvents: MAX_EVENTS });

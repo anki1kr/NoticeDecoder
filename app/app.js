@@ -1183,6 +1183,9 @@ async function feedCall(method, path, { body, token } = {}) {
   try {
     res = await timedFetch(`${feedBase()}${path}`, {
       method,
+      // Always ask the server (it answers 304 when nothing changed): a class reopened a minute after the CR moved a test
+      // must show the move, not the browser's 5-minute copy.
+      cache: 'no-cache',
       headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
