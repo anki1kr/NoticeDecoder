@@ -2,6 +2,16 @@
 
 For the team presenting at SETU 2026. Every number here comes from the sources listed in the README or from running the app.
 
+## 3-minute demo: Smart Campus Innovation Challenge (IIC, ACEM, 28 Oct 2026)
+
+The theme is "Beyond AI into Impact". The line to land: **"Dates come from rules, understanding comes from AI. A wrong date is never possible."**
+
+1. **Their own notice (30 s).** Paste the IIC email (examples/13-promo-challenge.txt): *Smart Campus Innovation Challenge, Wed 28 Oct, 2:20 PM, Room 208*, nothing to check, one tap to the calendar. Then upload a photo of the IIC poster: the same date and time read off the picture, each field amber once because a photo can be misread.
+2. **Where AI earns its place (40 s).** Paste a notice the rules can only half name (a fest or "mela" with no event word): the rules give "Event"; the AI check (Claude Haiku) renames it from the notice's own words, highlighted in the notice, with Undo. "The AI never touches a date. It only names things, and only when the rules are unsure, so a normal notice costs nothing."
+3. **Smart campus = the class calendar (60 s).** As the CR: Publish → the preview says *3 new*. Paste a revised notice ("Internal Test 2 will be held on 16 Nov"): the preview says *Moves 13 Nov → 16 Nov*. Publish. On a second phone, the subscribe page (scan the QR on the projector) shows "What changed: Moved". "One CR, one tap, the whole section's calendars move. No more 'did you see the group?'."
+4. **Robust (20 s).** "We tried to break it: 30,000 random notices, broken PDFs, password files, double taps, script in a notice, a leaked class key. 19 real bugs found and fixed, one of them only visible on the live server" (docs/BREAK-TEST.md).
+5. **Incubation ask (30 s).** Pilot with one ACEM section this month; the console counts notices published, revisions pushed and clashes caught before the date. Then department-wide; the department plan in the README.
+
 ## 2-minute demo (zero-touch version, 2026-10-15)
 
 0. **Open on the problem, not the app.** "A notice lands in the class group." Send the PDF sample into the demo group from the second phone. On the first phone (companion app installed, group ticked) a notification appears within seconds: *Added 3 events to your calendar*. Open the calendar: Internal Test 2, the deadline block, the guest lecture. **No paste, no form, no download.** Then: "and because the rules were sure of every field, it did not ask. When they are not sure..."

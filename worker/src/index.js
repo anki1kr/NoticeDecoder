@@ -2,27 +2,36 @@
 // link that updates itself. One Cloudflare Worker + one KV namespace, free tier. The event -> calendar mapping
 // (UIDs, times, reminders) is the app's own engine/ics.js, so the feed, the .ics download and the Google writer agree.
 //
-//   POST /api/class                      {name}                 -> {id, secret}        (secret shown once, kept by the CR)
-//   POST /api/class/:id/publish          Bearer secret, {events} -> {count, clashes}   (merge by UID; revised = update)
-//   DELETE /api/class/:id/events/:uid    Bearer secret          -> marks it cancelled (subscribers see it removed)
-//   GET  /c/:id.ics                      webcal feed (text/calendar)
-//   GET  /c/:id.json                     events as JSON (the Android app and the PWA poll this)
-//   GET  /c/:id                          subscribe page
-import { toICS, calendarEntries } from '../../app/engine/ics.js';
-import { findClashes } from '../../app/engine/clash.js';
+//   POST   /api/class                        {name}                   -> {id, secret}   (secret shown once, kept by the CR)
+//   POST   /api/class/:id/publish[?dry=1]    Bearer, {events, intents} -> the plan (dry) or {plan, added, moved, ...}
+//   GET    /api/class/:id/events             Bearer                   -> CR console: events, clashes, changes, pilot stats
+//   PATCH  /api/class/:id                    Bearer, {name}           -> rename
+//   POST   /api/class/:id/rotate             Bearer                   -> a new secret (the old one stops working)
+//   DELETE /api/class/:id                    Bearer                   -> delete the class and its feed
+//   PATCH  /api/class/:id/events/:uid        Bearer, {date,start,...} -> edit one published event (same UID)
+//   DELETE /api/class/:id/events/:uid        Bearer                   -> cancel it (STATUS:CANCELLED, subscribers drop it)
+//   POST   /api/class/:id/events/:uid/restore Bearer                  -> undo a cancel
+//   GET    /c/:id.ics | /c/:id.json | /c/:id                          -> webcal feed, JSON, subscribe page
+//   POST   /api/ai/refine                    {text, events}           -> AI check of the names and types (see ai.js)
+import { toICS } from '../../app/engine/ics.js';
+import { MAX_EVENTS, cleanEvent, upgrade, plan, apply, edit, setCancelled, liveEvents, clashReport, stats, publicChanges, istToday } from './feed.js';
+import { subscribePage } from './page.js';
+import { refine } from './ai.js';
 
-const MAX_EVENTS = 300;
-const MAX_BODY = 64 * 1024;
+const MAX_BODY = 128 * 1024;
+const MAX_INCOMING = 100;
 const ID_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o/1/l/i
-const EVENT_FIELDS = ['title', 'type', 'typeLabel', 'date', 'start', 'end', 'venue', 'link', 'durationMin', 'repeat', 'every', 'point', 'window', 'reportAt', 'cancelled'];
 
-const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', ...cors(), ...extra } });
+const cors = () => ({ 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS', 'access-control-allow-headers': 'authorization,content-type', 'access-control-max-age': '86400' });
+const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...cors(), ...extra } });
 const text = (body, status, type, extra = {}) => new Response(body, { status, headers: { 'content-type': type, ...cors(), ...extra } });
-const cors = () => ({ 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS', 'access-control-allow-headers': 'authorization,content-type' });
 
 function randomId(n, alphabet = ID_ALPHABET) {
-  const bytes = crypto.getRandomValues(new Uint8Array(n));
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
+  // Rejection sampling: `b % 31` alone makes the first letters of the alphabet more likely.
+  const out = [];
+  const limit = 256 - (256 % alphabet.length);
+  while (out.length < n) for (const b of crypto.getRandomValues(new Uint8Array(n * 2))) if (b < limit && out.length < n) out.push(alphabet[b % alphabet.length]);
+  return out.join('');
 }
 
 async function sha256(s) {
@@ -30,34 +39,25 @@ async function sha256(s) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Only the fields the calendar needs, with the same shape the PWA's workingCopy() produces.
-function cleanEvent(x) {
-  if (!x || typeof x !== 'object') return null;
-  const e = {};
-  for (const k of EVENT_FIELDS) if (x[k] !== undefined && x[k] !== null && x[k] !== '') e[k] = x[k];
-  if (typeof e.title !== 'string' || !e.title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(e.date || '')) return null;
-  e.title = e.title.trim().slice(0, 120);
-  if (!['test', 'deadline', 'lecture', 'other'].includes(e.type)) e.type = 'other';
-  for (const k of ['start', 'end', 'reportAt']) if (e[k] && !/^\d{2}:\d{2}$/.test(e[k])) delete e[k];
-  if (e.venue) e.venue = String(e.venue).slice(0, 120);
-  if (e.link && !/^https?:\/\/\S+$/.test(e.link)) delete e.link;
-  e.durationMin = Number(e.durationMin) || undefined;
-  e.repeat = Number(e.repeat) || undefined;
-  e.every = /^(?:(?:SU|MO|TU|WE|TH|FR|SA)(?:,|$))+$/.test(e.every) ? e.every : undefined;
-  return e;
-}
-
 const classKey = (id) => `class:${id}`;
+const validId = (id) => /^[a-z0-9]{6,12}$/.test(id);
 
 async function loadClass(env, id) {
-  if (!/^[a-z0-9]{6,12}$/.test(id)) return null;
+  if (!validId(id)) return null;
   const raw = await env.CLASSES.get(classKey(id));
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  try { return upgrade(JSON.parse(raw)); } catch { return null; }
 }
+const saveClass = (env, id, cls) => env.CLASSES.put(classKey(id), JSON.stringify(cls));
 
+// Constant-time compare of the two hashes: the secret is 32 random characters, but there is no reason to leak timing.
 async function authed(request, cls) {
-  const m = /^Bearer\s+(\S+)$/.exec(request.headers.get('authorization') || '');
-  return Boolean(m && cls && (await sha256(m[1])) === cls.secretHash);
+  const m = /^Bearer\s+(\S{8,200})$/.exec(request.headers.get('authorization') || '');
+  if (!m || !cls) return false;
+  const a = await sha256(m[1]), b = cls.secretHash || '';
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
 }
 
 async function readJson(request) {
@@ -65,135 +65,202 @@ async function readJson(request) {
   if (len > MAX_BODY) throw new Error('Body too large');
   const body = await request.text();
   if (body.length > MAX_BODY) throw new Error('Body too large');
-  return body ? JSON.parse(body) : {};
+  const data = body ? JSON.parse(body) : {};
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new SyntaxError('JSON body must be an object');
+  return data;
 }
 
-function subscribePage(cls, id, origin, appUrl) {
-  const feed = `${origin}/c/${id}.ics`;
-  const webcal = feed.replace(/^https?:/, 'webcal:');
-  const google = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`;
-  const events = Object.values(cls.events).filter((e) => !e.cancelled).sort((a, b) => `${a.date}${a.start || ''}`.localeCompare(`${b.date}${b.start || ''}`));
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const rows = events.slice(0, 50).map((e) => `<li><b>${esc(e.date)}</b> ${esc(e.start ? (e.type === 'deadline' ? `by ${e.start}` : e.end ? `${e.start}-${e.end}` : e.start) : 'all day')} · ${esc(e.title)}${e.venue ? ` · ${esc(e.venue)}` : ''}</li>`).join('');
-  const share = appUrl ? `${appUrl}#c=${id}` : null;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(cls.name)} · class calendar</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:640px;margin:0 auto;padding:20px;color:#1d1b26;background:#efeef2}
-.card{background:#fdfdfc;border:1px solid #d9d7e1;border-radius:8px;padding:16px;margin:16px 0}
-a.btn{display:inline-block;margin:6px 8px 6px 0;padding:10px 14px;border-radius:6px;border:1px solid #8f8aa6;color:#1d1b26;text-decoration:none;font-weight:600;background:#fff}
-a.btn.p{background:#3d2c8d;border-color:#3d2c8d;color:#fff}code{word-break:break-all}ul{padding-left:18px}small{color:#55526a}</style></head><body>
-<h1>${esc(cls.name)}</h1><p>One calendar for the whole class. Subscribe once; when the class representative publishes a new or revised notice, your calendar updates by itself.</p>
-<div class="card"><a class="btn p" href="${google}">Add to Google Calendar</a><a class="btn" href="${webcal}">Apple / Outlook (webcal)</a>${share ? `<a class="btn" href="${esc(share)}">Open in Notice Decoder</a>` : ''}
-<p><small>Feed address: <code>${esc(feed)}</code>. Google refreshes subscribed calendars every 12 to 24 hours; the Notice Decoder app shows changes at once.</small></p></div>
-<div class="card"><h2>${events.length} upcoming event${events.length === 1 ? '' : 's'}</h2><ul>${rows || '<li>Nothing published yet.</li>'}</ul></div>
-<p><small>Published with Notice Decoder. Check the original notice for changes.</small></p></body></html>`;
+async function limited(binding, key) {
+  if (!binding?.limit) return false;
+  try { return !(await binding.limit({ key })).success; } catch { return false; }
 }
 
-export async function handle(request, env) {
+const urls = (origin, id) => ({ feed: `${origin}/c/${id}.ics`, page: `${origin}/c/${id}` });
+
+// `newId`: the id the router picked for a class being created (its Durable Object is named after it).
+export async function handle(request, env, { newId } = {}) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
+  const ip = request.headers.get('cf-connecting-ip') || 'local';
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(env.TODAY || '') ? env.TODAY : istToday(); // TODAY: tests only
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors() });
 
   try {
+    if (request.method === 'POST' && path === '/api/ai/refine') return await refine(request, env, { json, ip, today });
+
     // Create a class
     if (request.method === 'POST' && path === '/api/class') {
+      if (await limited(env.CREATE_LIMIT, ip)) return json({ error: 'Too many classes created from this network. Wait a minute.' }, 429, { 'retry-after': '60' });
       const body = await readJson(request);
-      const name = String(body.name || '').trim().slice(0, 80);
+      const name = (typeof body.name === 'string' ? body.name : '').replace(/\s+/g, ' ').trim().slice(0, 80);
       if (!name) return json({ error: 'Give the class a name.' }, 400);
-      const id = randomId(8), secret = randomId(32, 'abcdefghijklmnopqrstuvwxyz0123456789');
-      const cls = { name, secretHash: await sha256(secret), events: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      await env.CLASSES.put(classKey(id), JSON.stringify(cls));
-      return json({ id, secret, name, feed: `${url.origin}/c/${id}.ics`, page: `${url.origin}/c/${id}` }, 201);
+      let id = newId && validId(newId) ? newId : null;
+      while (!id || await env.CLASSES.get(classKey(id))) id = randomId(8);
+      const secret = randomId(32, 'abcdefghijklmnopqrstuvwxyz0123456789');
+      const now = new Date().toISOString();
+      const cls = upgrade({ name, secretHash: await sha256(secret), events: {}, createdAt: now, updatedAt: now });
+      await saveClass(env, id, cls);
+      return json({ id, secret, name, ...urls(url.origin, id) }, 201);
     }
 
-    // Publish (merge by UID) and get the term-wide clash report back
-    let m = /^\/api\/class\/([a-z0-9]+)\/publish$/.exec(path);
-    if (request.method === 'POST' && m) {
-      const cls = await loadClass(env, m[1]);
-      if (!cls) return json({ error: 'No such class.' }, 404);
-      if (!(await authed(request, cls))) return json({ error: 'Wrong or missing class secret.' }, 401);
-      const body = await readJson(request);
-      const incoming = (Array.isArray(body.events) ? body.events : []).map(cleanEvent).filter(Boolean);
-      if (!incoming.length) return json({ error: 'No events with a title and a date.' }, 400);
-      if (body.replace) cls.events = {};
-      let added = 0, updated = 0;
-      const stats = cls.stats || (cls.stats = { publishes: 0, revised: 0, cancelled: 0, clashSeen: [] });
-      const when = (e) => `${e.date}|${e.start || ''}|${e.end || ''}`;
-      for (const entry of calendarEntries(incoming)) {
-        const before = cls.events[entry.uid];
-        if (before) { updated++; if (when(before) !== when(entry.event)) stats.revised++; } else added++;
-        cls.events[entry.uid] = { ...entry.event, uid: entry.uid, publishedAt: new Date().toISOString() };
+    let m = /^\/api\/class\/([^/]+)(?:\/(publish|events|rotate))?(?:\/([^/]+))?(?:\/(restore))?$/.exec(path);
+    if (m) {
+      const [, id, part, uidRaw, restore] = m;
+      const cls = await loadClass(env, id);
+      if (!cls) return json({ error: 'No such class. Check the link, or create a new class.' }, 404);
+      if (!(await authed(request, cls))) return json({ error: 'Wrong or missing class key. Only the class representative can change this class.' }, 401);
+      const done = async (data, status = 200) => { await saveClass(env, id, cls); return json(data, status); };
+
+      // Publish: plan first; ?dry=1 returns only the plan, so the CR sees what will change before the class does.
+      if (part === 'publish' && !uidRaw && request.method === 'POST') {
+        const body = await readJson(request);
+        const raw = Array.isArray(body.events) ? body.events.slice(0, MAX_INCOMING) : [];
+        const incoming = raw.map(cleanEvent).filter(Boolean);
+        if (!incoming.length) return json({ error: 'No events with a title and a real date to publish.' }, 400);
+        const intents = body.intents && typeof body.intents === 'object' ? body.intents : {};
+        if (body.replace === true) cls.events = {};
+        const items = plan(cls, incoming, intents);
+        const skipped = raw.length - incoming.length;
+        if (url.searchParams.get('dry') === '1') return json({ id, plan: items, skipped });
+        const counts = apply(cls, incoming, items);
+        cls.stats.publishes++;
+        const clashes = clashReport(cls, today);
+        // Every clash pair is counted once, the first time a publish shows it: "clashes the class heard about before the date".
+        cls.stats.clashSeen = [...new Set([...cls.stats.clashSeen, ...clashes.map((c) => `${c.a}|${c.b}|${c.date}`)])].slice(-500);
+        return done({ id, plan: items, skipped, ...counts, count: liveEvents(cls).length, clashes, ...urls(url.origin, id) });
       }
-      stats.publishes++;
-      const keep = Object.values(cls.events).sort((a, b) => (b.publishedAt || '').localeCompare(a.publishedAt || '')).slice(0, MAX_EVENTS);
-      cls.events = Object.fromEntries(keep.map((e) => [e.uid, e]));
-      cls.updatedAt = new Date().toISOString();
-      const live = Object.values(cls.events).filter((e) => !e.cancelled).map((e) => ({ ...e, id: e.uid }));
-      const byId = new Map(live.map((e) => [e.id, e]));
-      const clashes = findClashes(live).filter((c) => c.kind !== 'none').map((c) => ({ a: byId.get(c.a).title, b: byId.get(c.b).title, date: byId.get(c.a).date, msg: c.msg, action: c.action }));
-      // Every clash pair is counted once, the first time a publish shows it: "clashes the class heard about before the date".
-      stats.clashSeen = [...new Set([...stats.clashSeen, ...clashes.map((c) => `${c.a}|${c.b}|${c.date}`)])].slice(-500);
-      await env.CLASSES.put(classKey(m[1]), JSON.stringify(cls));
-      return json({ id: m[1], added, updated, count: live.length, clashes, feed: `${url.origin}/c/${m[1]}.ics`, page: `${url.origin}/c/${m[1]}` });
-    }
 
-    // CR console: everything published, with the term-wide clash report (Bearer only; students use /c/:id.json)
-    m = /^\/api\/class\/([a-z0-9]+)\/events$/.exec(path);
-    if (request.method === 'GET' && m) {
-      const cls = await loadClass(env, m[1]);
-      if (!cls) return json({ error: 'No such class.' }, 404);
-      if (!(await authed(request, cls))) return json({ error: 'Wrong or missing class secret.' }, 401);
-      const all = Object.values(cls.events).map((e) => ({ ...e, id: e.uid })).sort((a, b) => `${a.date}${a.start || ''}`.localeCompare(`${b.date}${b.start || ''}`));
-      const live = all.filter((e) => !e.cancelled);
-      const byId = new Map(live.map((e) => [e.id, e]));
-      const clashes = findClashes(live).filter((c) => c.kind !== 'none').map((c) => ({ a: byId.get(c.a).title, b: byId.get(c.b).title, date: byId.get(c.a).date, msg: c.msg, action: c.action }));
-      // What a pilot is judged on: notices published, events live, revisions pushed, clashes reported, cancellations.
-      const s = cls.stats || {};
-      const stats = { publishes: s.publishes || 0, events: live.length, revised: s.revised || 0, cancelled: s.cancelled || 0, clashesFound: (s.clashSeen || []).length, since: cls.createdAt };
-      return json({ id: m[1], name: cls.name, updatedAt: cls.updatedAt, events: all, clashes, stats, feed: `${url.origin}/c/${m[1]}.ics`, page: `${url.origin}/c/${m[1]}` });
-    }
+      // CR console: everything published, the clash report, what changed, the pilot numbers (Bearer only).
+      if (part === 'events' && !uidRaw && request.method === 'GET') {
+        const all = Object.values(cls.events).map((e) => ({ ...e, id: e.uid })).sort((a, b) => `${a.date}${a.start || ''}`.localeCompare(`${b.date}${b.start || ''}`));
+        return json({ id, name: cls.name, updatedAt: cls.updatedAt, events: all, clashes: clashReport(cls, today), changes: publicChanges(cls, 40), stats: stats(cls), today, ...urls(url.origin, id) });
+      }
 
-    // Cancel one event
-    m = /^\/api\/class\/([a-z0-9]+)\/events\/([^/]+)$/.exec(path);
-    if (request.method === 'DELETE' && m) {
-      const cls = await loadClass(env, m[1]);
-      if (!cls) return json({ error: 'No such class.' }, 404);
-      if (!(await authed(request, cls))) return json({ error: 'Wrong or missing class secret.' }, 401);
-      const uid = decodeURIComponent(m[2]);
-      if (!cls.events[uid]) return json({ error: 'No such event.' }, 404);
-      if (!cls.events[uid].cancelled) (cls.stats || (cls.stats = { publishes: 0, revised: 0, cancelled: 0, clashSeen: [] })).cancelled++;
-      cls.events[uid] = { ...cls.events[uid], cancelled: true, publishedAt: new Date().toISOString() };
-      cls.updatedAt = new Date().toISOString();
-      await env.CLASSES.put(classKey(m[1]), JSON.stringify(cls));
-      return json({ ok: true, uid });
+      if (!part && uidRaw) return json({ error: 'Not found' }, 404);
+      if (!part && request.method === 'PATCH') {
+        const body = await readJson(request);
+        const name = (typeof body.name === 'string' ? body.name : '').replace(/\s+/g, ' ').trim().slice(0, 80);
+        if (!name) return json({ error: 'Give the class a name.' }, 400);
+        cls.name = name;
+        cls.updatedAt = new Date().toISOString();
+        return done({ ok: true, id, name });
+      }
+      if (part === 'rotate' && !uidRaw && !restore && request.method === 'POST') {
+        const secret = randomId(32, 'abcdefghijklmnopqrstuvwxyz0123456789');
+        cls.secretHash = await sha256(secret);
+        return done({ ok: true, id, secret, name: cls.name, ...urls(url.origin, id) });
+      }
+      if (!part && request.method === 'DELETE') {
+        await env.CLASSES.delete(classKey(id));
+        return json({ ok: true, id, deleted: true });
+      }
+
+      if (part === 'events' && uidRaw) {
+        let uid;
+        try { uid = decodeURIComponent(uidRaw); } catch { return json({ error: 'Bad event id.' }, 400); }
+        if (!cls.events[uid]) return json({ error: 'No such event in this class.' }, 404);
+        if (restore && request.method === 'POST') { setCancelled(cls, uid, false); return done({ ok: true, uid, event: cls.events[uid] }); }
+        if (!restore && request.method === 'DELETE') { setCancelled(cls, uid, true); return done({ ok: true, uid }); }
+        if (!restore && request.method === 'PATCH') {
+          const body = await readJson(request);
+          const patch = {};
+          for (const k of ['title', 'type', 'date', 'start', 'end', 'venue', 'link', 'durationMin']) if (k in body) patch[k] = body[k] === '' ? null : body[k];
+          const event = edit(cls, uid, patch);
+          if (!event) return json({ error: 'That edit leaves the event without a title or a real date.' }, 400);
+          return done({ ok: true, uid, event });
+        }
+      }
+      return json({ error: 'Not found' }, 404);
     }
 
     // Feeds
     m = /^\/c\/([a-z0-9]+)(\.ics|\.json)?$/.exec(path);
-    if (request.method === 'GET' && m) {
-      const cls = await loadClass(env, m[1]);
-      if (!cls) return text('No such class.', 404, 'text/plain; charset=utf-8');
+    if ((request.method === 'GET' || request.method === 'HEAD') && m) {
+      const [, id, kind] = m;
+      const cls = await loadClass(env, id);
+      if (!cls) return kind ? text('No such class.', 404, 'text/plain; charset=utf-8') : text('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such class</title><p style="font:16px system-ui;padding:24px">No class with this link. Ask your class representative for the current link.</p>', 404, 'text/html; charset=utf-8');
       const events = Object.values(cls.events).map((e) => ({ ...e, id: e.uid }));
-      // Pollers (the Android app every 15 min, calendar apps) get a 304 until something was published.
-      const etag = `"${await sha256(`${m[1]}:${cls.updatedAt}:${m[2] || 'page'}`)}"`;
+      // Pollers (the Android app every 15 min, calendar apps) get a 304 until something was published. The page also
+      // changes at midnight (what is "upcoming"), so its tag carries the date.
+      const etag = `"${(await sha256(`${id}:${cls.updatedAt}:${kind || `page:${today}`}`)).slice(0, 32)}"`;
       if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: { etag, ...cors() } });
       const cache = { 'cache-control': 'public, max-age=300', etag };
-      if (m[2] === '.ics') {
+      if (kind === '.ics') {
         // Apple and Outlook honour the refresh hints; Google ignores them (12 to 24 h on its own schedule).
         const ics = toICS(events, { calName: cls.name, now: new Date(cls.updatedAt) })
-          .replace('X-WR-TIMEZONE:', `X-WR-CALDESC:Class notices published with Notice Decoder\r\nREFRESH-INTERVAL;VALUE=DURATION:PT1H\r\nX-PUBLISHED-TTL:PT1H\r\nX-WR-TIMEZONE:`);
-        return text(ics, 200, 'text/calendar; charset=utf-8', { ...cache, 'content-disposition': `inline; filename="${m[1]}.ics"` });
+          .replace('X-WR-TIMEZONE:', 'X-WR-CALDESC:Class notices published with Notice Decoder\r\nREFRESH-INTERVAL;VALUE=DURATION:PT1H\r\nX-PUBLISHED-TTL:PT1H\r\nX-WR-TIMEZONE:');
+        return text(ics, 200, 'text/calendar; charset=utf-8', { ...cache, 'content-disposition': `inline; filename="${id}.ics"` });
       }
-      if (m[2] === '.json') return json({ id: m[1], name: cls.name, updatedAt: cls.updatedAt, events }, 200, cache);
-      return text(subscribePage(cls, m[1], url.origin, env.APP_URL), 200, 'text/html; charset=utf-8', cache);
+      if (kind === '.json') return json({ id, name: cls.name, updatedAt: cls.updatedAt, events, changes: publicChanges(cls), clashes: clashReport(cls, today), today }, 200, cache);
+      return text(subscribePage({ cls, id, origin: url.origin, appUrl: env.APP_URL, today, clashes: clashReport(cls, today), changes: publicChanges(cls) }), 200, 'text/html; charset=utf-8', { ...cache, 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
     }
 
-    if (path === '/' || path === '/health') return json({ ok: true, service: 'notice-decoder-feed' });
+    if (path === '/' || path === '/health') return json({ ok: true, service: 'notice-decoder-feed', ai: Boolean(env.ANTHROPIC_API_KEY), maxEvents: MAX_EVENTS });
     return json({ error: 'Not found' }, 404);
   } catch (err) {
     const msg = String(err && err.message || err);
-    return json({ error: /JSON|too large/i.test(msg) ? msg : 'Something went wrong.' }, /too large/i.test(msg) ? 413 : /JSON/i.test(msg) ? 400 : 500);
+    if (/too large/i.test(msg)) return json({ error: 'That is too much at once. Publish fewer events.' }, 413);
+    if (err instanceof SyntaxError || /JSON/i.test(msg)) return json({ error: 'Bad JSON.' }, 400);
+    console.error('feed error', err);
+    return json({ error: 'Something went wrong on the class server. Try again.' }, 500);
   }
 }
 
-export default { fetch: (request, env) => handle(request, env) };
+// ---------- one Durable Object per class: strongly consistent, one request at a time ----------
+//
+// KV alone was measured losing writes (26 Oct 2026, live): a read right after a publish came back with the class as it
+// was BEFORE the publish (KV caches reads per data centre for about a minute), so a cancel or a second publish within
+// that minute could write the old copy back and wipe what was just published. Every class request now goes to that
+// class's own object, whose storage reads its own writes, and requests run one after another. KV keeps only the AI
+// day counter, and is read once per class to bring over classes created before this change.
+const TOMBSTONE = '__deleted__';
+
+export class ClassRoom {
+  constructor(ctx, env) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+
+  store() {
+    const s = this.ctx.storage, legacy = this.env.CLASSES;
+    return {
+      get: async (k) => {
+        const v = await s.get(k);
+        if (v === TOMBSTONE) return null;
+        if (v !== undefined) return v;
+        const old = k.startsWith('class:') && legacy ? await legacy.get(k) : null; // a class from before the move
+        if (old) await s.put(k, old);
+        return old;
+      },
+      put: (k, v) => s.put(k, v),
+      // A tombstone, so a deleted class is not brought back from the old KV copy.
+      delete: async (k) => { await s.put(k, TOMBSTONE); if (legacy) await legacy.delete(k); },
+    };
+  }
+
+  async fetch(request) {
+    const env = { ...this.env, CLASSES: this.store() };
+    const newId = request.headers.get('x-nd-new-id') || undefined;
+    return this.ctx.blockConcurrencyWhile(() => handle(request, env, { newId }));
+  }
+}
+
+const CLASS_PATH = /^\/(?:api\/class|c)\/([a-z0-9]{6,12})(?:[./]|$)/;
+const room = (env, id) => env.ROOMS.get(env.ROOMS.idFromName(id));
+
+export async function route(request, env) {
+  if (!env.ROOMS) return handle(request, env); // unit tests and old configs: the plain KV path
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+  if (request.method === 'POST' && path === '/api/class') {
+    const id = randomId(8);
+    const headers = new Headers(request.headers);
+    headers.set('x-nd-new-id', id);
+    return room(env, id).fetch(new Request(request, { headers }));
+  }
+  const m = request.method !== 'OPTIONS' && CLASS_PATH.exec(path);
+  if (m) return room(env, m[1]).fetch(request);
+  return handle(request, env); // the AI check, /health, CORS preflights, 404s
+}
+
+export default { fetch: (request, env) => route(request, env) };

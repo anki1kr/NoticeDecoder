@@ -19,13 +19,24 @@
 <body>
 <main>
   <h1>Privacy</h1>
-  <p class="upd">Notice Decoder, a SETU 2026 project by team Nova Nexus. Last updated 17 October 2026.</p>
+  <p class="upd">Notice Decoder, a SETU 2026 project by team Nova Nexus. Last updated 26 October 2026.</p>
 
-  <h2>Your notices stay on your device</h2>
-  <p>The text, PDF or photo you give Notice Decoder is read by code running in your own browser (or in the Chrome
-  extension and Android app). It is not sent to our servers, and we have no server that receives it. Photos and PDFs are
-  read on the device too; the first time, the reader files (about 10 MB) are downloaded to your browser and then work
-  offline.</p>
+  <h2>Your notices are read on your device</h2>
+  <p>The text, PDF, Word file or photo you give Notice Decoder is read by code running in your own browser (or in the
+  Chrome extension and Android app). Photos, PDFs and Word files are read on the device too; the first time, the reader
+  files (about 10 MB) are downloaded to your browser and then work offline. The one exception is the AI check below.</p>
+
+  <h2>AI check (optional, on by default, only when the rules are unsure)</h2>
+  <p>When the rules cannot name an event well (for example they only found the word "Practical"), or the text came from a
+  photo, the app sends <b>the notice text and the events the rules found</b> (title, type, date, time, venue) to our
+  class server, which asks Anthropic's Claude Haiku model to suggest better names and types. Nothing else is sent: not
+  your name, not your calendar, not your Google account. A notice the rules read cleanly is never sent. The answer can
+  only rename an event or point at one the rules missed; dates and times always come from the rules, and every AI change
+  is marked and can be undone. Our server caches the AI's answer (which quotes a few words of the notice) for up to 7
+  days, keyed by a fingerprint of the notice, so the same notice is not sent twice; the notice itself is not saved.
+  Anthropic processes the text under its <a href="https://www.anthropic.com/legal/commercial-terms">commercial terms</a>
+  (by default, API inputs are not used to train its models). Turn it off any time with the "AI check" switch under the
+  notice box.</p>
 
   <h2>Google Calendar (optional)</h2>
   <p>If you press <b>Add all to Google Calendar</b>, Google asks you to sign in and allow Notice Decoder to
@@ -40,17 +51,20 @@
 
   <h2>What is stored in your browser</h2>
   <ul>
-    <li>Settings such as "Add automatically" and the class you opened.</li>
+    <li>Settings such as "Add automatically" and "AI check", and the class you opened (so it is one tap next time).</li>
+    <li>For a class representative: the class id and key for publishing.</li>
     <li>The events you added to a calendar from this browser (title, date, time, venue), so a new notice can be checked against them for clashes. Past events are dropped; "Clear them" under Clashes removes the rest.</li>
     <li>A short queue of reviewed events that could not be added while you were offline (the last 10), removed once they are added.</li>
   </ul>
   <p>Clearing the site's data in your browser removes all of it.</p>
 
   <h2>Class calendar (optional)</h2>
-  <p>If a class representative publishes events to a class calendar, those reviewed events (title, date, time, venue)
-  are stored on a calendar service so classmates can subscribe, together with a few counters for the class console
-  (how many publishes, revisions and cancellations, and which clashes were reported). Nothing is published unless the
-  representative presses Publish.</p>
+  <p>If a class representative publishes events to a class calendar, those reviewed events (title, date, time, venue,
+  link) are stored on our calendar service (Cloudflare) so classmates can subscribe, together with a short list of what
+  changed and a few counters for the class console (how many publishes, revisions and cancellations, and which clashes
+  were reported). The representative sees a preview and nothing is published until they press Publish. The class key
+  lives only in the representative's browser; the server keeps a one-way hash of it. Anyone with the class link can see
+  the class calendar, so do not publish anything private.</p>
 
   <h2>No ads, no tracking</h2>
   <p>There are no ads, no analytics and no tracking scripts in the app.</p>

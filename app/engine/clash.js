@@ -81,7 +81,8 @@ function compare(a, b, sameDay) {
     const is = p.type !== 'deadline' && /s$/i.test(p.typeLabel || '') ? 'are' : 'is';
     if ((t > s && t < e) || (p.type !== 'deadline' && t === s)) {
       const free = freeBefore(t, sameDay);
-      const busy = sameDay.filter((x) => !isPoint(x) && toMin(x.start) < t && toMin(x.end) > free).map((x) => `"${x.title}"`);
+      // endOf, not x.end: a lecture with no end time (1 hour) used to crash here, and the app then showed "No clashes".
+      const busy = sameDay.filter((x) => !isPoint(x) && toMin(x.start) < t && endOf(x) > free).map((x) => `"${x.title}"`);
       const action = p.type === 'deadline'
         ? `Finish "${p.title}" before ${fmt12(fromMin(free))}: from ${fmt12(fromMin(free))} to ${fmt12(p.start)} you are in ${busy.join(' and ')}.`
         : `Ask the coordinator whether you can leave ${name(ev, p)} for it.`;

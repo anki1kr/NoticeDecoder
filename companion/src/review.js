@@ -10,7 +10,7 @@ import { upsertAll } from './calendar.js';
 import { removePending, log } from './store.js';
 import { notifyAdded } from './notify.js';
 
-const APP_URL = String(Constants.expoConfig?.extra?.appUrl || 'https://anki1kr.me/NoticeDecoder/app/');
+const APP_URL = String(Constants.expoConfig?.extra?.appUrl || 'https://noticedecoder.pages.dev/app/');
 const E = () => globalThis.NoticeEngine;
 
 export default function Review({ item, onDone }) {

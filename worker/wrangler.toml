@@ -1,7 +1,8 @@
-# Class feed Worker. Free plan is enough (100k requests/day, KV 1k writes/day).
+# Class feed + AI check Worker. Free plan is enough (100k requests/day, KV 1k writes/day).
 # Deploy once:
-#   cd worker && npx wrangler login
+#   cd worker && npm ci && npx wrangler login
 #   npx wrangler kv namespace create CLASSES          # paste the printed id below
+#   npx wrangler secret put ANTHROPIC_API_KEY         # optional: turns on the AI check (Claude Haiku 5.5)
 #   npx wrangler deploy                               # prints https://notice-decoder-feed.<account>.workers.dev
 # Then put that URL in app/config.js as FEED_BASE.
 name = "notice-decoder-feed"
@@ -9,8 +10,32 @@ main = "src/index.js"
 compatibility_date = "2026-10-01"
 
 [vars]
-APP_URL = "https://anki1kr.me/NoticeDecoder/app/"
+APP_URL = "https://noticedecoder.pages.dev/app/"
+# Pages allowed to spend the AI key (browsers always send Origin on these POSTs).
+AI_ORIGINS = "https://noticedecoder.pages.dev,https://anki1kr.me,http://127.0.0.1:8771"
+# Hard ceiling on paid AI calls per day (IST). Well under $0.001 each with Haiku 5.5; 0 switches the AI off.
+AI_DAILY_CAP = "300"
 
 [[kv_namespaces]]
 binding = "CLASSES"
 id = "224af06f95da4ba094846d28e1c5dea3"
+
+# One Durable Object per class (strongly consistent; KV was measured losing writes). SQLite-backed = free plan.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "ClassRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ClassRoom"]
+
+# Per-IP limits (Workers rate limiting binding; period is 10 or 60 seconds).
+[[ratelimits]]
+name = "CREATE_LIMIT"
+namespace_id = "1001"
+simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "AI_LIMIT"
+namespace_id = "1002"
+simple = { limit = 8, period = 60 }

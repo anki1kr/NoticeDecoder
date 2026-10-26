@@ -1,0 +1,10 @@
+# Test fixtures and examples are binary: line-ending conversion (core.autocrlf) would corrupt them.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.docx binary
+*.doc binary
+*.pptx binary
+*.ico binary

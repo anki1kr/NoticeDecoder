@@ -1,5 +1,5 @@
 // Popup: the same rules engine as the web app (engine.js is dist/notice-engine.js), run on the text in the box.
-const APP = 'https://anki1kr.me/NoticeDecoder/app/';
+const APP = 'https://noticedecoder.pages.dev/app/';
 const E = globalThis.NoticeEngine;
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };

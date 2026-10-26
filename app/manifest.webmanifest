@@ -21,7 +21,7 @@
       "title": "title",
       "text": "text",
       "url": "url",
-      "files": [{ "name": "file", "accept": ["image/*", "application/pdf", "text/plain"] }]
+      "files": [{ "name": "file", "accept": ["image/*", "application/pdf", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"] }]
     }
   }
 }

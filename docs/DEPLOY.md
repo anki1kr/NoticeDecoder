@@ -18,7 +18,7 @@ The "Add all to Google Calendar" button needs a public OAuth **Web** client id. 
    only sees a "Notice Decoder" calendar it creates itself). Because the scope is non-sensitive, set the publishing
    status to **In production**: no test-user list is needed and nobody gets the "Google hasn't verified this app" screen.
 4. **Credentials → Create credentials → OAuth client ID** → Application type **Web application** →
-   Name "Notice Decoder web" → **Authorised JavaScript origins**: `https://anki1kr.me` and `http://127.0.0.1:8771`
+   Name "Notice Decoder web" → **Authorised JavaScript origins**: `https://noticedecoder.pages.dev`, `https://anki1kr.me` and `http://127.0.0.1:8771`
    (no redirect URIs: the page uses the token flow) → Create → copy the **Client ID** (`…apps.googleusercontent.com`).
 5. In the repo:
    ```bash
@@ -47,6 +47,20 @@ node tools/smoke-live.mjs                   # creates a throwaway class, publish
 
 The web app now shows section 6 "Class calendar" and the "Open class" box; the Android app shows the class id field.
 Free plan limits: 100k requests/day, 1k KV writes/day; a class publishes a few times a week.
+
+### 2b. AI check (Claude Haiku 5.5)   ~2 minutes, optional
+
+```bash
+cd worker
+npm ci                                    # the Anthropic SDK, bundled into the Worker on deploy
+npx wrangler secret put ANTHROPIC_API_KEY # paste the key at the prompt (it never lands in a file or in git)
+npx wrangler deploy
+cd .. && node tools/smoke-live.mjs --ai   # "feed AI check configured" + one real call that names the IIC challenge
+```
+
+Spend is bounded three ways: only notices the rules are unsure about are sent, the same notice is answered from the
+cache, and `AI_DAILY_CAP` in `wrangler.toml` (300/day) is a hard ceiling. `AI_DAILY_CAP = "0"` turns the AI off without
+removing the key. To remove it: `npx wrangler secret delete ANTHROPIC_API_KEY`.
 
 ## 3. Gmail (each student, their own account)   ~5 minutes
 

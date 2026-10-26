@@ -120,6 +120,7 @@ const __dates = (() => {
     [9, 'सितंबर'], [9, 'सितम्बर'], [10, 'अक्टूबर'], [10, 'अक्तूबर'], [11, 'नवंबर'], [11, 'नवम्बर'], [12, 'दिसंबर'], [12, 'दिसम्बर'],
   ];
   const HMON = `(${HINDI_MONTHS.map(([, n]) => n).join('|')})`;
+  const YEAR = String.raw`(?:19|20)\d{2}`;
   const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   const pad = (n) => String(n).padStart(2, '0');
@@ -190,18 +191,19 @@ const __dates = (() => {
     const free = (s, e) => !taken.some(([a, b]) => s < b && e > a);
     const push = (tok) => { out.push(tok); taken.push([tok.s, tok.e]); };
 
-    const dayMonth = new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?${MON}\b\.?(?:,?\s*(\d{4})\b)?`, 'gi');
+    // The year sits on the same line and looks like one: "Nov 13\n0700 hrs" is a date and a time, not the year 700.
+    const dayMonth = new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?${MON}\b\.?(?:,?[ \t]*(${YEAR})\b)?`, 'gi');
     for (const m of text.matchAll(dayMonth)) {
       const d = +m[1], mo = MONTHS[m[2].slice(0, 3).toLowerCase()];
       if (d >= 1 && d <= 31) push({ kind: 'abs', s: m.index, e: m.index + m[0].length, d, m: mo, y: m[3] ? +m[3] : null, raw: m[0] });
     }
-    const monthDay = new RegExp(String.raw`\b${MON}\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4})\b)?`, 'gi');
+    const monthDay = new RegExp(String.raw`\b${MON}\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?[ \t]*(${YEAR})\b)?`, 'gi');
     for (const m of text.matchAll(monthDay)) {
       const s = m.index, e = s + m[0].length, d = +m[2];
       if (d >= 1 && d <= 31 && free(s, e)) push({ kind: 'abs', s, e, d, m: MONTHS[m[1].slice(0, 3).toLowerCase()], y: m[3] ? +m[3] : null, raw: m[0] });
     }
     // Hindi: "13 नवंबर 2026", "१३ नवम्बर"
-    const hindiDayMonth = new RegExp(String.raw`(?<!\d)(\d{1,2})\s*${HMON}(?:,?\s*(\d{4})(?!\d))?`, 'gu');
+    const hindiDayMonth = new RegExp(String.raw`(?<!\d)(\d{1,2})\s*${HMON}(?:,?[ \t]*(${YEAR})(?!\d))?`, 'gu');
     for (const m of text.matchAll(hindiDayMonth)) {
       const s = m.index, e = s + m[0].length, d = +m[1];
       const mo = HINDI_MONTHS.find(([, n]) => n === m[2])[0];
@@ -212,7 +214,7 @@ const __dates = (() => {
       const s = m.index, e = s + m[0].length, y = +m[1], mo = +m[2], d = +m[3];
       if (free(s, e) && validDate(y, mo, d) && y >= 2000 && y <= 2099) push({ kind: 'abs', s, e, d, m: mo, y, raw: m[0], isoForm: true });
     }
-    for (const m of text.matchAll(/\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})\b/g)) {
+    for (const m of text.matchAll(/\b(\d{1,2})[/.-](\d{1,2})[/.-]((?:19|20)\d{2}|\d{2})\b/g)) {
       const s = m.index, e = s + m[0].length;
       const a = +m[1], b = +m[2];
       if (!free(s, e) || a < 1 || a > 31 || b < 1 || b > 12) continue;
@@ -440,14 +442,17 @@ const __parse = (() => {
     { fam: 'gd', type: 'test', re: /\b(?:[Gg]roup [Dd]iscussions?|GD)\b/ },
     { fam: 'interview', type: 'test', re: /\binterviews?\b/i },
     { fam: 'results', type: 'other', re: /\bresults?\b|परिणाम/i },
-    { fam: 'test', type: 'test', re: /\b(practical vivas?|lab vivas?|internal tests?|unit tests?|class tests?|slip tests?|surprise tests?|mock tests?|mid[- ]?(?:terms?|sems?|semesters?)(?: exams?| tests?)?|sessionals?(?: exams?)?|end[- ]?sem(?:ester)?(?: (?:exams?|practicals?))?|semester exams?|model exams?|lab exams?|re-?exams?|supplementary(?: exams?)?|backlog exams?|internal assessments?|examinations?|exams?|tests?|quiz(?:zes)?|viva(?: voce)?|practicals?|assessments?|aptitude|olympiad)\b/i },
+    // "practical" is a test only as a noun: "Practical on 5 Nov", not "practical innovations" or "practical knowledge".
+    { fam: 'test', type: 'test', re: /\b(practical vivas?|lab vivas?|internal tests?|unit tests?|class tests?|slip tests?|surprise tests?|mock tests?|mid[- ]?(?:terms?|sems?|semesters?)(?: exams?| tests?)?|sessionals?(?: exams?)?|end[- ]?sem(?:ester)?(?: (?:exams?|practicals?))?|semester exams?|model exams?|lab exams?|re-?exams?|supplementary(?: exams?)?|backlog exams?|internal assessments?|examinations?|exams?|tests?|quiz(?:zes)?|viva(?: voce)?|practicals?(?!\s+(?:innovations?|knowledge|skills?|experiences?|exposure|solutions?|approach(?:es)?|applications?|ideas?|problems?|learning|training|insights?|tips|uses?|implementations?|projects?|work|ways?|aspects?|understanding|examples?|guidance|purposes?|steps?|life|world|matters?|sense|demonstrations?|sessions?|orientation)\b)|assessments?|aptitude|olympiad)\b/i },
     { fam: 'test', type: 'test', re: /(परीक्षा|टेस्ट|क्विज़|क्विज|प्रैक्टिकल|मौखिकी)/u },
     // Exam acronyms are case-sensitive on purpose: "see" and "cat" are ordinary words.
     { fam: 'test', type: 'test', re: /\b(CIE|SEE|CAT[- ]?[12]|FAT|MST|EST)\b/ },
     { fam: 'deadline', type: 'deadline', re: /\b(submissions?|submit(?:ted)?|upload(?:ed|ing)?|deadline|last date|due(?! to)(?: date)?|registrations?|fee payment|fees?|pay(?:ment)?)\b/i },
     { fam: 'lecture', type: 'lecture', re: /\b((?:extra|remedial|make-?up|doubt|revision|bridge|special|additional|compensatory|substitute)\s+(?:class(?:es)?|lectures?|sessions?)|guest lectures?|expert lectures?|lectures?|classes|courses?|tutorials?|seminars?(?!\s+(?:hall|room))|webinars?|workshops?|masterclass(?:es)?|bootcamps?|sessions?|orientation|induction|talks?|trainings?)\b/i },
     { fam: 'lecture', type: 'lecture', re: /(व्याख्यान|कक्षा|सेमिनार|कार्यशाला|वेबिनार|सत्र)/u },
-    { fam: 'other', type: 'other', re: /\b(placement drives?|campus drives?|pool campus|drives?|fests?|hackathons?|(?:industrial|field|educational|study)\s+(?:visits?|trips?|tours?)|excursions?|meetings?|ceremony|convocation|competitions?|sports day|annual day|farewell|freshers?(?:['’]s)? party|cultural (?:fest|event|night)|parade|camp|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
+    { fam: 'other', type: 'other', re: /\b(placement drives?|campus drives?|pool campus|drives?|fests?|hackathons?|ideathons?|(?:industrial|field|educational|study)\s+(?:visits?|trips?|tours?)|excursions?|meetings?|ceremony|convocation|competitions?|contests?|tournaments?|symposi(?:um|a)|conclaves?|summits?|conferences?|exhibitions?|expos?|sports day|annual day|farewell|freshers?(?:['’]s)? party|cultural (?:fest|event|night)|parade|camp|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
+    // "Smart Campus Innovation Challenge": a named challenge is an event. Lower-case "challenges" in a sentence is not.
+    { fam: 'other', type: 'other', re: /\b((?:[Ii]nnovation|[Cc]oding|[Dd]esign|[Ss]tartup|[Ii]deation|[Cc]ase [Ss]tudy|[Pp]itch(?:ing)?)\s+[Cc]hallenges?|(?<![.!?]\s)(?<!^)Challenges?)\b/ },
     { fam: 'other', type: 'other', re: /(कार्यक्रम|प्रतियोगिता|बैठक|समारोह|उत्सव)/u },
   ];
   const TYPE_LABEL = { test: 'Test', deadline: 'Deadline', lecture: 'Lecture', other: 'Event' };
@@ -560,6 +565,7 @@ const __parse = (() => {
     if (k.fam === 'deadline') return 'Deadline';
     if (k.fam === 'results') return 'Results';
     if (k.fam === 'test') return /quiz|क्विज/.test(w) ? 'Quiz' : /exam|sem|cie|see|sessional|परीक्षा/.test(w) ? 'Exam' : /viva|मौखिकी/.test(w) ? 'Viva' : /practical|प्रैक्टिकल/.test(w) ? 'Practical' : 'Test';
+    if (/challenges?$/.test(w)) return 'Challenge';
     return cap(w === 'classes' ? 'class' : w.replace(/s$/, ''));
   }
 
@@ -974,7 +980,7 @@ const __parse = (() => {
       if (ev.zoom && !(ev.link && /zoom/i.test(ev.link))) ev.flags.push({ field: 'venue', level: 'warn', msg: 'The Zoom link is not in this message.' });
       if (!ev.venue && ev.link) { ev.venue = 'Online'; ev.why.venue = 'A joining link is given.'; }
       if (ev.end && toMin(ev.end) <= toMin(ev.start)) ev.flags.push({ field: 'end', level: 'warn', msg: 'End time is before the start. Please fix it.' });
-      if (source !== 'text' && ev.date) ev.flags.push({ field: 'date', level: 'warn', msg: 'Read from a photo: check the date and time against the picture.' });
+      if (source !== 'text' && source !== 'docx' && ev.date) ev.flags.push({ field: 'date', level: 'warn', msg: 'Read from a photo: check the date and time against the picture.' });
       delete ev.unit;
     }
     result.events = events;
@@ -1231,7 +1237,8 @@ const __clash = (() => {
       const is = p.type !== 'deadline' && /s$/i.test(p.typeLabel || '') ? 'are' : 'is';
       if ((t > s && t < e) || (p.type !== 'deadline' && t === s)) {
         const free = freeBefore(t, sameDay);
-        const busy = sameDay.filter((x) => !isPoint(x) && toMin(x.start) < t && toMin(x.end) > free).map((x) => `"${x.title}"`);
+        // endOf, not x.end: a lecture with no end time (1 hour) used to crash here, and the app then showed "No clashes".
+        const busy = sameDay.filter((x) => !isPoint(x) && toMin(x.start) < t && endOf(x) > free).map((x) => `"${x.title}"`);
         const action = p.type === 'deadline'
           ? `Finish "${p.title}" before ${fmt12(fromMin(free))}: from ${fmt12(fromMin(free))} to ${fmt12(p.start)} you are in ${busy.join(' and ')}.`
           : `Ask the coordinator whether you can leave ${name(ev, p)} for it.`;
@@ -1296,9 +1303,19 @@ const __ics = (() => {
 
   const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const compact = (isoDateTime) => isoDateTime.replace(/[-:]/g, '');
-  const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'event';
+  // FNV-1a: a short, stable, sync hash (Apps Script has no crypto.subtle), so a Hindi title gets its own UID.
+  const fnv = (s) => { let h = 0x811c9dc5; for (const ch of s) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); };
+  // The UID stem of a title. ASCII titles keep their readable slug; a title with other scripts ("गणित की परीक्षा")
+  // used to collapse to "event", so every Hindi event shared one UID and overwrote the others.
+  const slug = (s) => {
+    const ascii = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    return /[^\x00-\x7F]/.test(s.normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '')) ? `${ascii || 'e'}-${fnv(s.trim().toLowerCase())}` : ascii || 'event';
+  };
+  const VALID_UID = /^[a-z0-9-]{1,80}@notice-decoder$/;
 
   const titleOf = (e) => (e.title || '').trim() || 'Event';
+  // Only a plain web link reaches a calendar: a typed "javascript:" or a link with spaces never does.
+  const webLink = (u) => (typeof u === 'string' && /^https?:\/\/[^\s<>"']+$/i.test(u.trim()) && u.length <= 500 ? u.trim() : null);
   const summaryOf = (e) => (e.type === 'deadline' ? `${/deadline/i.test(titleOf(e)) ? '' : 'Deadline: '}${titleOf(e)}${e.start ? ` (by ${fmt12(e.start)})` : ''}` : titleOf(e));
 
   // Start and end. A deadline is a point; it is shown as the 30 minutes leading up to it.
@@ -1317,7 +1334,7 @@ const __ics = (() => {
     [/\b(placement|drive|interview|gd|recruit|internship|hiring)\b/i, '💼'],
     [/\b(lab|practical|workshop)\b/i, '🔬'],
     [/\b(lecture|class|seminar|webinar|talk|session|guest)\b/i, '🎓'],
-    [/\b(fest|cultural|competition|hackathon|contest|sports|match)\b/i, '🏆'],
+    [/\b(fest|cultural|competition|hackathon|ideathon|contest|challenge|tournament|sports|match)\b/i, '🏆'],
     [/\b(holiday|vacation)\b/i, '🏖️'],
     [/\b(meeting|orientation)\b/i, '👥'],
   ];
@@ -1350,13 +1367,15 @@ const __ics = (() => {
       else if (cur.status === 'ok') cur.status = 'tight';
       if (other && !cur.with.includes(other)) cur.with.push(other);
     };
-    for (const row of findClashes(events)) {
+    // A cancelled event (class feed) is still in the file as STATUS:CANCELLED, but it clashes with nothing.
+    const live = events.filter((e) => !e.cancelled);
+    for (const row of findClashes(live)) {
       if (row.kind === 'none') continue;
       mark(row.a, 'clash', title.get(row.b));
       mark(row.b, 'clash', title.get(row.a));
     }
     const days = new Map();
-    for (const e of events) if (e.date && e.start) days.set(e.date, [...(days.get(e.date) || []), e]);
+    for (const e of live) if (e.date && e.start) days.set(e.date, [...(days.get(e.date) || []), e]);
     for (const list of days.values()) {
       const sorted = [...list].sort((a, b) => toMin(a.start) - toMin(b.start));
       for (let i = 0; i + 1 < sorted.length; i++) {
@@ -1386,7 +1405,7 @@ const __ics = (() => {
       e.venue ? `📍 ${e.venue}` : '',
       e.durationMin ? (e.window ? `⏳ Open ${fmt12(e.start)} to ${fmt12(e.end)}; takes ${e.durationMin} minutes once you start` : `⏳ Takes ${e.durationMin} minutes`) : '',
       e.reportAt ? `🚪 Report by ${fmt12(e.reportAt)}` : '',
-      e.link ? `🔗 ${e.link}` : '',
+      webLink(e.link) ? `🔗 ${webLink(e.link)}` : '',
       rem ? `🔔 ${rem}` : '',
       '',
       'Added with Notice Decoder. Check the original notice for changes.',
@@ -1394,18 +1413,25 @@ const __ics = (() => {
   }
 
   // One entry per dated event. The same title gives the same UID (a second event with the same title gets -2),
-  // so a revised notice imported later updates the event instead of adding a copy.
+  // so a revised notice imported later updates the event instead of adding a copy. An event that already carries a UID
+  // (the class feed assigns them, and a student's copy of a class event keeps it) keeps that UID.
   function calendarEntries(events) {
     const used = new Map();
+    const taken = new Set(events.map((e) => e.uid).filter((u) => VALID_UID.test(u || '')));
     const status = statusMap(events);
     return events.filter((x) => x.date).map((e) => {
       const st = status.get(e.id) || { status: 'ok', with: [] };
-      const base = slug(titleOf(e));
-      const n = (used.get(base) || 0) + 1;
-      used.set(base, n);
+      let uid = VALID_UID.test(e.uid || '') ? e.uid : null;
+      if (!uid) {
+        const base = slug(titleOf(e));
+        let n = used.get(base) || 0;
+        do { n++; uid = `${base}${n > 1 ? '-' + n : ''}@notice-decoder`; } while (taken.has(uid));
+        used.set(base, n);
+        taken.add(uid);
+      }
       const { allDay, start, end } = whenOf(e);
       return {
-        uid: `${base}${n > 1 ? '-' + n : ''}@notice-decoder`,
+        uid,
         summary: `${STATUS_MARK[st.status] || ''}${emojiOf(e)} ${summaryOf(e)}`,
         status: st.status,
         colorId: STATUS_COLOR[st.status] || COLOR_BY_TYPE[e.type] || COLOR_BY_TYPE.other,
@@ -1413,7 +1439,7 @@ const __ics = (() => {
         location: e.venue || null,
         description: descriptionOf(e, st),
         category: (e.typeLabel || e.type).toUpperCase(),
-        url: e.link || null,
+        url: webLink(e.link),
         recurrence: e.repeat > 1 ? `RRULE:FREQ=${e.every ? `WEEKLY;BYDAY=${e.every}` : 'DAILY'};COUNT=${e.repeat}` : null,
         reminder: e.start ? (REMINDER[e.type] || REMINDER.other) : null,
         title: titleOf(e),
@@ -1430,7 +1456,7 @@ const __ics = (() => {
     const dates = entry.allDay ? `${compact(entry.start)}/${compact(entry.end)}` : `${compact(entry.start)}/${compact(entry.end)}`;
     const q = new URLSearchParams({ action: 'TEMPLATE', text: entry.summary, dates, ctz: TZ });
     if (entry.location) q.set('location', entry.location);
-    if (e.link) q.set('details', `Link: ${e.link}`);
+    if (webLink(e.link)) q.set('details', `Link: ${webLink(e.link)}`);
     if (entry.recurrence) q.set('recur', entry.recurrence);
     return `https://calendar.google.com/calendar/render?${q}`;
   }
@@ -1457,7 +1483,7 @@ const __ics = (() => {
     return lines.map(fold).join('\r\n') + '\r\n';
   }
 
-  return { REMINDER, TZ, emojiOf, calendarEntries, gcalUrl, toICS };
+  return { REMINDER, TZ, slug, emojiOf, calendarEntries, gcalUrl, toICS };
 })();
 
 root.NoticeEngine = {
@@ -1477,6 +1503,6 @@ root.NoticeEngine = {
   prettyDate: __dates.prettyDate,
   fixOcrText: __ocrfix.fixOcrText,
   normalizeNames: __ocrfix.normalizeNames,
-  version: "8f9fdf3",
+  version: "f3e779f2",
 };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -36,9 +36,19 @@ function fold(line) {
 
 const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 const compact = (isoDateTime) => isoDateTime.replace(/[-:]/g, '');
-const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'event';
+// FNV-1a: a short, stable, sync hash (Apps Script has no crypto.subtle), so a Hindi title gets its own UID.
+const fnv = (s) => { let h = 0x811c9dc5; for (const ch of s) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); };
+// The UID stem of a title. ASCII titles keep their readable slug; a title with other scripts ("गणित की परीक्षा")
+// used to collapse to "event", so every Hindi event shared one UID and overwrote the others.
+export const slug = (s) => {
+  const ascii = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  return /[^\x00-\x7F]/.test(s.normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '')) ? `${ascii || 'e'}-${fnv(s.trim().toLowerCase())}` : ascii || 'event';
+};
+const VALID_UID = /^[a-z0-9-]{1,80}@notice-decoder$/;
 
 const titleOf = (e) => (e.title || '').trim() || 'Event';
+// Only a plain web link reaches a calendar: a typed "javascript:" or a link with spaces never does.
+const webLink = (u) => (typeof u === 'string' && /^https?:\/\/[^\s<>"']+$/i.test(u.trim()) && u.length <= 500 ? u.trim() : null);
 const summaryOf = (e) => (e.type === 'deadline' ? `${/deadline/i.test(titleOf(e)) ? '' : 'Deadline: '}${titleOf(e)}${e.start ? ` (by ${fmt12(e.start)})` : ''}` : titleOf(e));
 
 // Start and end. A deadline is a point; it is shown as the 30 minutes leading up to it.
@@ -57,7 +67,7 @@ const EMOJI_BY_WORD = [
   [/\b(placement|drive|interview|gd|recruit|internship|hiring)\b/i, '💼'],
   [/\b(lab|practical|workshop)\b/i, '🔬'],
   [/\b(lecture|class|seminar|webinar|talk|session|guest)\b/i, '🎓'],
-  [/\b(fest|cultural|competition|hackathon|contest|sports|match)\b/i, '🏆'],
+  [/\b(fest|cultural|competition|hackathon|ideathon|contest|challenge|tournament|sports|match)\b/i, '🏆'],
   [/\b(holiday|vacation)\b/i, '🏖️'],
   [/\b(meeting|orientation)\b/i, '👥'],
 ];
@@ -90,13 +100,15 @@ function statusMap(events) {
     else if (cur.status === 'ok') cur.status = 'tight';
     if (other && !cur.with.includes(other)) cur.with.push(other);
   };
-  for (const row of findClashes(events)) {
+  // A cancelled event (class feed) is still in the file as STATUS:CANCELLED, but it clashes with nothing.
+  const live = events.filter((e) => !e.cancelled);
+  for (const row of findClashes(live)) {
     if (row.kind === 'none') continue;
     mark(row.a, 'clash', title.get(row.b));
     mark(row.b, 'clash', title.get(row.a));
   }
   const days = new Map();
-  for (const e of events) if (e.date && e.start) days.set(e.date, [...(days.get(e.date) || []), e]);
+  for (const e of live) if (e.date && e.start) days.set(e.date, [...(days.get(e.date) || []), e]);
   for (const list of days.values()) {
     const sorted = [...list].sort((a, b) => toMin(a.start) - toMin(b.start));
     for (let i = 0; i + 1 < sorted.length; i++) {
@@ -126,7 +138,7 @@ function descriptionOf(e, st) {
     e.venue ? `📍 ${e.venue}` : '',
     e.durationMin ? (e.window ? `⏳ Open ${fmt12(e.start)} to ${fmt12(e.end)}; takes ${e.durationMin} minutes once you start` : `⏳ Takes ${e.durationMin} minutes`) : '',
     e.reportAt ? `🚪 Report by ${fmt12(e.reportAt)}` : '',
-    e.link ? `🔗 ${e.link}` : '',
+    webLink(e.link) ? `🔗 ${webLink(e.link)}` : '',
     rem ? `🔔 ${rem}` : '',
     '',
     'Added with Notice Decoder. Check the original notice for changes.',
@@ -134,18 +146,25 @@ function descriptionOf(e, st) {
 }
 
 // One entry per dated event. The same title gives the same UID (a second event with the same title gets -2),
-// so a revised notice imported later updates the event instead of adding a copy.
+// so a revised notice imported later updates the event instead of adding a copy. An event that already carries a UID
+// (the class feed assigns them, and a student's copy of a class event keeps it) keeps that UID.
 export function calendarEntries(events) {
   const used = new Map();
+  const taken = new Set(events.map((e) => e.uid).filter((u) => VALID_UID.test(u || '')));
   const status = statusMap(events);
   return events.filter((x) => x.date).map((e) => {
     const st = status.get(e.id) || { status: 'ok', with: [] };
-    const base = slug(titleOf(e));
-    const n = (used.get(base) || 0) + 1;
-    used.set(base, n);
+    let uid = VALID_UID.test(e.uid || '') ? e.uid : null;
+    if (!uid) {
+      const base = slug(titleOf(e));
+      let n = used.get(base) || 0;
+      do { n++; uid = `${base}${n > 1 ? '-' + n : ''}@notice-decoder`; } while (taken.has(uid));
+      used.set(base, n);
+      taken.add(uid);
+    }
     const { allDay, start, end } = whenOf(e);
     return {
-      uid: `${base}${n > 1 ? '-' + n : ''}@notice-decoder`,
+      uid,
       summary: `${STATUS_MARK[st.status] || ''}${emojiOf(e)} ${summaryOf(e)}`,
       status: st.status,
       colorId: STATUS_COLOR[st.status] || COLOR_BY_TYPE[e.type] || COLOR_BY_TYPE.other,
@@ -153,7 +172,7 @@ export function calendarEntries(events) {
       location: e.venue || null,
       description: descriptionOf(e, st),
       category: (e.typeLabel || e.type).toUpperCase(),
-      url: e.link || null,
+      url: webLink(e.link),
       recurrence: e.repeat > 1 ? `RRULE:FREQ=${e.every ? `WEEKLY;BYDAY=${e.every}` : 'DAILY'};COUNT=${e.repeat}` : null,
       reminder: e.start ? (REMINDER[e.type] || REMINDER.other) : null,
       title: titleOf(e),
@@ -170,7 +189,7 @@ export function gcalUrl(e) {
   const dates = entry.allDay ? `${compact(entry.start)}/${compact(entry.end)}` : `${compact(entry.start)}/${compact(entry.end)}`;
   const q = new URLSearchParams({ action: 'TEMPLATE', text: entry.summary, dates, ctz: TZ });
   if (entry.location) q.set('location', entry.location);
-  if (e.link) q.set('details', `Link: ${e.link}`);
+  if (webLink(e.link)) q.set('details', `Link: ${webLink(e.link)}`);
   if (entry.recurrence) q.set('recur', entry.recurrence);
   return `https://calendar.google.com/calendar/render?${q}`;
 }

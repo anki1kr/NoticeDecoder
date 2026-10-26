@@ -1,0 +1,13 @@
+{
+  "name": "notice-decoder-feed",
+  "private": true,
+  "type": "module",
+  "description": "Class feed + AI check for Notice Decoder (Cloudflare Worker). Deploy: npx wrangler deploy",
+  "scripts": {
+    "test": "node test/feed.test.mjs && node test/room.test.mjs && node test/ai.test.mjs",
+    "deploy": "npx wrangler deploy"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0"
+  }
+}

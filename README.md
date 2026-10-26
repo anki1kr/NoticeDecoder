@@ -4,9 +4,18 @@
 
 | Demo video | Website | Code |
 |---|---|---|
-| https://youtu.be/joI75POVTr0 | https://anki1kr.me/NoticeDecoder/ | https://github.com/anki1kr/NoticeDecoder |
+| https://youtu.be/joI75POVTr0 | https://noticedecoder.pages.dev/app/ | https://github.com/anki1kr/NoticeDecoder |
 
-Runs fully in the browser: the notice never leaves your device. Installs as an app (add to home screen); once installed it opens offline and appears in WhatsApp's **Share** sheet, so a notice goes from the class group to decoded events in two taps.
+The rules run in the browser: the notice is read on your device. Only when the rules are unsure, an optional AI check (Claude Haiku) gets the notice text to fix names; dates always come from the rules. Installs as an app (add to home screen); once installed it opens offline and appears in WhatsApp's **Share** sheet, so a notice goes from the class group to decoded events in two taps.
+
+## 2026-10-26: AI check, class calendar v2, Word files, break-tested
+
+| What | How it works | Code |
+|---|---|---|
+| **AI check, only when the rules are unsure** | A weak name ("Practical" read out of "practical innovations"), nothing found in a notice that has dates, or text from a photo triggers ONE call to Claude Haiku 5.5 through the class server; a clean notice costs nothing. The model gets the notice (capped at 6,000 characters) plus one line per event and answers a few JSON fields. It never sets a date or a time: a new name is used only if its quote is really in the notice and its words are the notice's words; an event it says the rules missed is dated by our own rules from the words it quotes, and comes in amber. Every AI change is marked, highlighted in the notice and has Undo. Same notice twice = answered from the cache. The key lives only on the server; per-IP limit and a daily cap (300 calls a day, well under $0.10 at Haiku prices) bound the spend. | `app/ai.js`, `worker/src/ai.js` |
+| **Class calendar v2** | The CR sees a **preview** ("2 new, 1 moved") before the class does. A second "Quiz" on another date is a new event (v1 silently moved the first one); a specific title on another date, or a notice that says "postponed to", moves it, and the CR can flip either guess with one tap. Console: edit a published event's date/time/venue in place (same UID, so every subscriber's copy moves), cancel and **bring back**, "What changed lately", QR code for the projector, WhatsApp link, rename, a key link for a second phone or co-CR, a new key if that link leaks, forget on this device. Students see what changed when they open the class, and the class is one tap away next time. The subscribe page groups upcoming events by day (Today / Tomorrow), lists changes and clashes, has a QR code and a dark mode. | `worker/src/feed.js`, `worker/src/page.js`, `app/app.js` |
+| **Word files** | `.docx` read on the device with no library (a .docx is a zip; the browser's `DecompressionStream` inflates it); tables come out as `cell \| cell` rows, so an exam timetable in a Word table becomes one event per row. Old `.doc`, damaged, password-protected and zip-bomb files get a plain message. | `app/docx.js` |
+| **Break-tested** | 30,000 random notices and 4,000 random event lists through the engine (fuzz), 200 KB pastes, script in notices, tampered share links, 5-digit years, 31 Feb, `javascript:` links, double and triple taps on every button, broken and wrong files, the AI answering late or not at all, the class server down, a leaked class key. Bugs found and fixed are listed in `docs/BREAK-TEST.md`. | `tests/fuzz.test.mjs`, `tools/break-check.mjs` |
 
 ## Zero-touch (2026-10-15)
 
@@ -75,7 +84,7 @@ The closest tools we found (ScreenToCal, and a notice-to-calendar project from a
 | "13 Nvo", "Thrusday", "Sepetmber" | Typo-tolerant month and weekday names (same length, offsets kept), with a note "read 'Nvo' as Nov" |
 | A photo: `1O:OO AM`, `l3 Nov`, `Room2O4`, lines broken at the paper's edge | OCR cleanup before the rules: letter/digit confusions inside numbers, glued AM/PM, dewrapped sentences, table pipes |
 
-AI is not needed for any of this, so results are the same every time, cost nothing to run and can be checked by the student.
+None of this needs AI, so results are the same every time, cost nothing to run and can be checked by the student. The optional AI check only names and sorts what the rules found (or points at what they missed); it never sets a date or a time.
 
 ## Who pays (sustainability)
 
@@ -99,7 +108,9 @@ No install, no build. Serve the `app` folder with any static server:
 npx serve app        # or: python -m http.server 8000 --directory app
 ```
 
-Tests (Node 18+): `node tests/engine.test.mjs` (40 engine tests), `node worker/test/feed.test.mjs` (10), `node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs` (7), `cd companion && npm test` (5). Browser check of the whole page, the share link, the share target and offline mode: start the server, then `node tools/ui-check.mjs` (Playwright, 81 checks, 85 with `OCR_CHECKS=1` which downloads the OCR model once; `PLAYWRIGHT_DIR` may point at any project that has Playwright installed). Test notices with expected results live in `examples/` (six, including an exam timetable, two same-hour tests and a Hindi notice).
+Tests (Node 20+): `node tests/engine.test.mjs` (44 engine tests), `node tests/fuzz.test.mjs` (1,500 random notices + 4,000 random event lists + 200 KB pastes; `FUZZ_N`/`FUZZ_SEED` for more), `node tests/files.test.mjs` (Word reader, broken files, AI-answer guard, 7), `npm ci --prefix worker && node worker/test/feed.test.mjs` (18) `&& node worker/test/ai.test.mjs` (10, a fake Claude, no key), `node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs` (7), `cd companion && npm test` (5).
+
+Browser checks (Playwright; `PLAYWRIGHT_DIR` may point at any project that has it): start the app (`python -m http.server 8771 --bind 127.0.0.1 --directory app`) and the REAL Worker on Node with a fake Claude (`node tools/feed-dev.mjs --port 8787 --fake-ai`, no Cloudflare account needed), then `node tools/ui-check.mjs` (84 checks: the whole page, share link, share target, offline, class feed) and `node tools/break-check.mjs` (74 ways to break it; 80 with `OCR_CHECKS=1`, which also reads photos, a scanned PDF and a 108-megapixel picture). Test notices live in `examples/`; broken files in `tests/fixtures/` (`python tools/make-file-fixtures.py` rebuilds them).
 
 ## Code map
 
@@ -114,7 +125,12 @@ Tests (Node 18+): `node tests/engine.test.mjs` (40 engine tests), `node worker/t
 - `app/pdftext.js`, `app/ocr.js`, `app/engine/ocrfix.js`: PDF text layer, photo OCR (on-device), OCR cleanup + typo-tolerant names
 - `tools/configure.mjs`, `tools/smoke-live.mjs`, `docs/DEPLOY.md`: one-command configuration, live checks, the four owner-side setup steps
 - `tools/make-fixtures.py` → `examples/07-photo-notice.png`, `examples/08-pdf-timetable.pdf`: the photo and PDF fixtures the browser check uploads
-- `worker/`: class feed (Cloudflare Worker + KV), `worker/test/feed.test.mjs`
+- `worker/`: class feed + AI check (Cloudflare Worker + KV), `worker/test/feed.test.mjs`, `worker/test/ai.test.mjs`
 - `integrations/gmail-apps-script/`: Gmail -> calendar, `test/run.mjs` runs it against fake Apps Script services
 - `companion/`: Android app (Expo), `test/pipeline.test.mjs`
 - `tools/bundle-engine.mjs` -> `dist/notice-engine.js`: the engine as one plain script for Apps Script and the Android app
+- `app/ai.js`: when an AI check is worth a call, what is sent, and the guard that applies an answer without trusting it
+- `app/docx.js`: Word (.docx) to text on the device, tables as rows, with zip-bomb and damage checks
+- `worker/src/feed.js` (publish plan: new / moved / changed, edits, cancels, what changed), `worker/src/page.js` (subscribe page), `worker/src/ai.js` (Claude Haiku call, cache, daily cap)
+- `tools/feed-dev.mjs`: the Worker on plain Node with an in-memory KV and a fake Claude, for the browser checks and an offline demo
+- `tools/break-check.mjs`, `tests/fuzz.test.mjs`, `tests/files.test.mjs`: break tests; `docs/BREAK-TEST.md`: what they found

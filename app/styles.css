@@ -317,5 +317,35 @@ a, .link { text-underline-offset: 3px; }
 .undo .link { padding-left: 2px; font-size: 14px; }
 .fallback-copy { margin-top: 10px; font-size: 14px; }
 input[type="number"] { -moz-appearance: textfield; }
+
+/* AI check: one quiet line under the events, never in the way */
+.ai-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 12px; }
+.ai-line .status { margin: 0; flex: 1 1 260px; font-weight: 500; font-size: 14px; }
+#ai-status[data-kind="busy"] { color: var(--accent); }
+#ai-row { font-size: 14px; }
+
+/* Class calendar v2: preview before publish, console, what changed */
+.follow-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); font-weight: 600; }
+.preview { margin-top: 14px; padding: 14px; border: 2px solid var(--accent); border-radius: 8px; background: var(--paper); }
+.preview h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.preview-list li { margin-bottom: 10px; }
+.plan-tag { display: inline-block; min-width: 5.5em; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); text-align: center; }
+.plan-add .plan-tag { border-color: var(--green); color: var(--green); }
+.plan-move .plan-tag, .plan-update .plan-tag { border-color: var(--amber); color: var(--amber); }
+.plan-restore .plan-tag { border-color: var(--accent); color: var(--accent); }
+.plan-same { color: var(--muted); }
+.changes li { margin-bottom: 6px; }
+.muted { color: var(--muted); }
+.console-past { opacity: .7; }
+.console-what { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.console-edit { flex: 1 1 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; padding: 10px; margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.console-edit .actions { grid-column: 1 / -1; margin-top: 4px; }
+#class-section .console-edit .lbl { margin: 0 0 4px; }
+#class-manage, #class-changes-wrap { margin-top: 12px; }
+#class-manage summary, #class-changes-wrap summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+.qr-box { margin-top: 12px; text-align: center; }
+.qr-box svg { width: min(300px, 80vw); height: auto; background: #fff; padding: 8px; border-radius: 8px; border: 1px solid var(--line); }
 input[type="url"] { overflow-wrap: anywhere; }
 .open-link { display: inline-flex; align-items: center; text-decoration: none; }
+.status[data-kind="warn"] { color: var(--amber); }
+#class-console-list .link { font-size: 14px; padding: 6px 8px; min-height: 36px; }

@@ -12,7 +12,7 @@ const CONFIG = {
   // '' = your default calendar; or the exact name of a calendar you created, e.g. 'College'.
   calendarName: '',
   // Where the "needs a check" link opens.
-  appUrl: 'https://anki1kr.me/NoticeDecoder/app/',
+  appUrl: 'https://noticedecoder.pages.dev/app/',
   // Email yourself when a notice has an uncertain field (recommended). false = only a label.
   emailOnCheck: true,
   maxThreadsPerRun: 20,

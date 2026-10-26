@@ -20,7 +20,7 @@
         <div>
           <h1>Notice Decoder</h1>
           <p class="lede">Paste a college notice. Get clear events, catch clashes, add them to your calendar.</p>
-          <p class="small">Runs in your browser. Your notice never leaves this device. <span id="offline-note" hidden>You are offline; everything still works.</span></p>
+          <p class="small">The rules run in your browser. Only when they are unsure, the AI check sends the notice text (nothing else) to Claude. <span id="offline-note" hidden>You are offline; everything except the AI check and the class calendar still works.</span></p>
         </div>
         <button type="button" id="install-btn" class="btn small" hidden>Install app</button>
       </div>
@@ -30,17 +30,18 @@
   <main class="wrap">
     <section class="card" id="input-card" aria-labelledby="input-title">
       <h2 id="input-title">1. Paste a notice</h2>
+      <p id="follow-row" class="follow-row" hidden><span id="follow-text"></span> <button type="button" id="follow-open-btn" class="btn small">Open</button></p>
       <label class="lbl" for="notice-input">Your notice</label>
-      <textarea id="notice-input" rows="8" placeholder="Paste the notice from WhatsApp, a PDF or the notice board..." aria-describedby="input-hint input-error"></textarea>
+      <textarea id="notice-input" rows="8" maxlength="200000" placeholder="Paste the notice from WhatsApp, a PDF or the notice board..." aria-describedby="input-hint input-error"></textarea>
       <p id="input-error" class="error" hidden></p>
       <p id="input-hint" class="hint">Press Ctrl+Enter (Cmd+Enter on a Mac) to decode. On a phone, install the app and share any notice to it straight from WhatsApp.</p>
       <div class="actions">
         <button type="button" id="decode-btn" class="btn primary">Decode notice</button>
         <button type="button" id="paste-btn" class="btn" hidden>Paste and decode</button>
-        <button type="button" id="upload-btn" class="btn">Upload a PDF or photo</button>
+        <button type="button" id="upload-btn" class="btn">Upload PDF, Word or photo</button>
         <button type="button" id="camera-btn" class="btn" hidden>Take a photo</button>
         <button type="button" id="clear-btn" class="btn">Clear</button>
-        <input type="file" id="file-input" accept="image/*,application/pdf,text/plain" hidden>
+        <input type="file" id="file-input" accept="image/*,application/pdf,text/plain,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
         <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
       </div>
       <p id="file-status" class="status" role="status" aria-live="polite" hidden></p>
@@ -48,7 +49,11 @@
         <input type="checkbox" id="hindi-ocr">
         <span>The photo is in Hindi (Devanagari)</span>
       </label>
-      <p class="hint">Photos and PDFs are read on this device (nothing is uploaded). The first photo downloads the reader once (about 10 MB); after that it works offline. Drop a file on the box, or paste a screenshot.</p>
+      <label class="check" id="ai-row" hidden>
+        <input type="checkbox" id="ai-toggle" checked>
+        <span>AI check when the rules are unsure (sends only the notice text to Claude)</span>
+      </label>
+      <p class="hint">Photos, PDFs and Word files are read on this device (nothing is uploaded). The first photo downloads the reader once (about 10 MB); after that it works offline. Drop a file on the box, or paste a screenshot.</p>
       <div class="samples">
         <span>Try an example:</span>
         <div id="sample-list" class="sample-list"></div>
@@ -56,7 +61,7 @@
       <div id="class-open-row" hidden>
         <label class="lbl" for="class-join">In a class that publishes its calendar? Open it by link or id</label>
         <div class="actions join-row">
-          <input id="class-join" type="text" inputmode="text" autocomplete="off" placeholder="https://.../c/abcd2345 or abcd2345">
+          <input id="class-join" type="text" inputmode="text" autocomplete="off" maxlength="200" placeholder="https://.../c/abcd2345 or abcd2345">
           <button type="button" id="class-join-btn" class="btn">Open class</button>
         </div>
         <p id="class-open-result" class="status" role="status" aria-live="polite"></p>
@@ -70,6 +75,7 @@
       <section class="card shared-banner" id="shared-banner" aria-labelledby="shared-title" hidden>
         <h2 id="shared-title">Shared with your class</h2>
         <p id="shared-text" class="hint"></p>
+        <ul id="shared-changes" class="plain changes" hidden></ul>
       </section>
 
       <section class="card" id="notice-card" aria-labelledby="notice-title">
@@ -81,6 +87,10 @@
       <section aria-labelledby="events-title">
         <h2 id="events-title" class="section-title">3. Events</h2>
         <p id="events-hint" class="hint"></p>
+        <div class="ai-line">
+          <button type="button" id="ai-btn" class="btn small" hidden>Check names with AI</button>
+          <p id="ai-status" class="status" role="status" aria-live="polite" hidden></p>
+        </div>
         <p id="events-empty" class="card empty" hidden>No events found in this notice. Check that it names a date and a time, or add the event by hand.</p>
         <div id="event-list" class="events"></div>
         <button type="button" id="add-btn" class="btn add-btn">+ Add event manually</button>
@@ -138,29 +148,55 @@
         </div>
         <p id="export-status" class="status" role="status" aria-live="polite"></p>
       </section>
-
-      <section class="card" id="class-section" aria-labelledby="class-title" hidden>
-        <h2 id="class-title">6. Class calendar</h2>
-        <p class="hint">Class representatives publish once; the class subscribes once to a calendar that updates itself when a notice changes. Term-wide clashes are checked on every publish.</p>
-        <p id="class-status" class="hint"></p>
-        <div class="actions">
-          <button type="button" id="class-publish-btn" class="btn primary">Publish to class</button>
-          <button type="button" id="class-link-btn" class="btn" hidden>Copy subscribe link</button>
-        </div>
-        <p id="class-result" class="status" role="status" aria-live="polite"></p>
-        <div id="class-console" hidden>
-          <div class="actions">
-            <button type="button" id="class-refresh-btn" class="btn small">Show everything published</button>
-          </div>
-          <p id="class-console-hint" class="hint"></p>
-          <ul id="class-console-list" class="plain"></ul>
-        </div>
-      </section>
     </div>
+
+    <section class="card" id="class-section" aria-labelledby="class-title" hidden>
+      <h2 id="class-title">6. Class calendar</h2>
+      <p class="hint">Class representatives publish once; the class subscribes once to a calendar that updates itself when a notice changes. You see exactly what will change before anyone else does.</p>
+      <p id="class-status" class="hint"></p>
+      <div class="actions">
+        <button type="button" id="class-publish-btn" class="btn primary">Publish to class</button>
+        <button type="button" id="class-link-btn" class="btn" hidden>Copy subscribe link</button>
+        <button type="button" id="class-wa-btn" class="btn" hidden>Send link on WhatsApp</button>
+        <button type="button" id="class-qr-btn" class="btn" hidden>Show QR code</button>
+      </div>
+      <div id="class-qr" class="qr-box" hidden></div>
+      <div id="class-preview" class="preview" hidden>
+        <h3>Check before the class sees it</h3>
+        <p id="class-preview-hint" class="hint"></p>
+        <ul id="class-preview-list" class="plain preview-list"></ul>
+        <div class="actions">
+          <button type="button" id="class-confirm-btn" class="btn primary">Publish</button>
+          <button type="button" id="class-preview-cancel" class="btn">Not now</button>
+        </div>
+      </div>
+      <p id="class-result" class="status" role="status" aria-live="polite"></p>
+      <div id="class-console" hidden>
+        <div class="actions">
+          <button type="button" id="class-refresh-btn" class="btn small">Show everything published</button>
+        </div>
+        <p id="class-console-hint" class="hint"></p>
+        <ul id="class-console-list" class="plain"></ul>
+        <details id="class-changes-wrap" hidden>
+          <summary>What changed lately</summary>
+          <ul id="class-changes" class="plain changes"></ul>
+        </details>
+        <details id="class-manage">
+          <summary>Manage this class</summary>
+          <div class="actions">
+            <button type="button" id="class-rename-btn" class="btn small">Rename</button>
+            <button type="button" id="class-backup-btn" class="btn small">Use on another phone</button>
+            <button type="button" id="class-rotate-btn" class="btn small">New class key</button>
+            <button type="button" id="class-forget-btn" class="btn small">Forget on this device</button>
+          </div>
+          <p class="hint">The class key is kept only in this browser. "Use on another phone" copies a link that carries it (for you or a co-CR, never the class group). If that link leaks, "New class key" makes every old link useless.</p>
+        </details>
+      </div>
+    </section>
   </main>
 
   <footer class="wrap foot">
-    <p><strong>How it works:</strong> clear rules find dates, times, places and clashes. Every result shows why. <a href="privacy.html">Privacy</a> · <a href="pilot.html">For departments</a></p>
+    <p><strong>How it works:</strong> clear rules find dates, times, places and clashes, and every result shows why. An optional AI check (Claude Haiku) only fixes names and types; dates always come from the rules. <a href="privacy.html">Privacy</a> · <a href="pilot.html">For departments</a></p>
   </footer>
 
   <script type="module" src="app.js"></script>

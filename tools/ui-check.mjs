@@ -30,26 +30,11 @@ await context.addInitScript(() => {
     },
   };
 });
-await context.addInitScript(() => {
-  window.__ndFeedBase = 'https://feed.test';
-  // the fake feed's store lives in localStorage so a second page (the student) sees what the first (the CR) published
-  const feed = { get events() { try { return JSON.parse(localStorage.getItem('__ndFeed') || '[]'); } catch { return []; } }, set events(v) { localStorage.setItem('__ndFeed', JSON.stringify(v)); } };
-  window.__ndFeedLog = [];
-  const real = window.fetch.bind(window);
-  window.fetch = async (url, init = {}) => {
-    const u = String(url);
-    if (!u.startsWith('https://feed.test')) return real(url, init);
-    const body = init.body ? JSON.parse(init.body) : null;
-    window.__ndFeedLog.push({ method: init.method || 'GET', url: u, body, auth: init.headers?.Authorization || null });
-    const j = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json' } });
-    if (u.endsWith('/api/class')) return j({ id: 'abcd2345', secret: 'sec', name: body.name, feed: 'https://feed.test/c/abcd2345.ics', page: 'https://feed.test/c/abcd2345' }, 201);
-    if (/\/publish$/.test(u)) { if (init.headers?.Authorization !== 'Bearer sec') return j({ error: 'Wrong or missing class secret.' }, 401); let added = 0, updated = 0; const list = feed.events; for (const e of body.events) { const i = list.findIndex((x) => x.title === e.title); if (i >= 0) { list[i] = e; updated++; } else { list.push(e); added++; } } feed.events = list; return j({ id: 'abcd2345', added, updated, count: list.length, clashes: feed.events.length >= 3 ? [{ a: 'Internal Test 2', b: 'Guest lecture: AI in Healthcare', date: '2026-11-13', msg: 'Clash. They overlap from 11:00 to 11:30 AM (30 minutes).' }] : [] }); }
-    if (/\/api\/class\/abcd2345\/events$/.test(u) && (init.method || 'GET') === 'GET') { if (init.headers?.Authorization !== 'Bearer sec') return j({ error: 'Wrong or missing class secret.' }, 401); const evs = feed.events.map((e) => ({ ...e, uid: `${e.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}@notice-decoder` })); return j({ id: 'abcd2345', name: 'III CSE A', updatedAt: '2026-10-15T10:00:00Z', events: evs, clashes: evs.filter((e) => !e.cancelled).length >= 3 ? [{ a: 'Internal Test 2', b: 'Guest lecture: AI in Healthcare', date: '2026-11-13', msg: 'Clash. They overlap from 11:00 to 11:30 AM (30 minutes).' }] : [] }); }
-    if (/\/api\/class\/abcd2345\/events\//.test(u) && init.method === 'DELETE') { const uid = decodeURIComponent(u.split('/events/')[1]); const list = feed.events; const i = list.findIndex((e) => `${e.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}@notice-decoder` === uid); if (i >= 0) { list[i] = { ...list[i], cancelled: true }; feed.events = list; } return j({ ok: true, uid }); }
-    if (/\/c\/abcd2345\.json$/.test(u)) return j({ id: 'abcd2345', name: 'III CSE A', updatedAt: '2026-10-15T10:00:00Z', events: feed.events.map((e) => ({ ...e, uid: `${e.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}@notice-decoder` })) });
-    return j({ error: 'Not found' }, 404);
-  };
-});
+// The class feed is the REAL Worker running on Node (node tools/feed-dev.mjs --port 8787 --fake-ai). The AI check is
+// switched off here so these checks stay deterministic; tools/break-check.mjs tests the AI on its own.
+const FEED = process.env.FEED_URL || 'http://127.0.0.1:8787';
+await fetch(`${FEED}/__dev/reset`, { method: 'POST' }).catch(() => { console.log('start the feed first: node tools/feed-dev.mjs --port 8787 --fake-ai'); process.exit(2); });
+await context.addInitScript((feed) => { window.__ndFeedBase = feed; try { localStorage.setItem('nd-ai', '0'); } catch { /* ignore */ } }, FEED);
 const titlesOf = () => page.locator('#event-list .ev').evaluateAll((els) => els.map((e) => e.querySelector('[data-field="title"] input')?.value ?? e.querySelector('.row-title')?.firstChild?.textContent));
 const page = await context.newPage();
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -129,38 +114,46 @@ ok((await page2.locator('#summary').innerText()).includes('1 clash'), 'shared li
 await page2.screenshot({ path: 'tmp/shot-shared-390.png', fullPage: true });
 await page2.close();
 
-// 5b. Class feed: first publish creates the class, the report comes back, a student opens it by id and by #c= link
+// 5b. Class feed (real Worker): the first publish creates the class and shows a PREVIEW; nothing goes out before "Publish"
 ok(await page.locator('#class-section').isVisible(), 'class feed: section shown when a feed base is configured');
+const feedReqs = [];
+page.on('request', (r) => { if (r.url().startsWith(FEED)) feedReqs.push(`${r.method()} ${r.url().slice(FEED.length)}`); });
 page.once('dialog', (d) => d.accept('III CSE A'));
 await page.locator('#class-publish-btn').click();
-await page.waitForFunction(() => /Published: 3 new/.test(document.querySelector('#class-result').innerText), null, { timeout: 5000 }).catch(() => {});
+await page.waitForSelector('#class-preview:not([hidden])', { timeout: 8000 }).catch(() => {});
+ok(/3 new/.test(await page.locator('#class-preview-hint').innerText()) && await page.locator('#class-preview-list li').count() === 3, 'class feed: the preview says "3 new" before anything is published', await page.locator('#class-preview-hint').innerText());
+ok(feedReqs.filter((r) => /publish$/.test(r)).length === 0, 'class feed: nothing published yet (only a dry run)', feedReqs.join(', '));
+await page.locator('#class-confirm-btn').click();
+await page.waitForFunction(() => /Published:/.test(document.querySelector('#class-result').innerText), null, { timeout: 8000 }).catch(() => {});
 const pub = await page.locator('#class-result').innerText();
-ok(/Published: 3 new, 0 updated, 3 in the class calendar/.test(pub) && /1 clash across/.test(pub), 'class feed: publish created the class, 3 events, clash report', pub);
-const flog = await page.evaluate(() => window.__ndFeedLog);
-ok(flog.some((r) => r.url.endsWith('/api/class') && r.body.name === 'III CSE A') && flog.some((r) => /publish$/.test(r.url) && r.auth === 'Bearer sec' && r.body.events.length === 3 && r.body.events[0].title === 'Internal Test 2'), 'class feed: create + authenticated publish with the reviewed events');
+ok(/Published: 3 new\. 3 events in the class calendar\./.test(pub) && /1 clash coming up/.test(pub), 'class feed: publish created the class, 3 events, clash report', pub);
+const myCls = await page.evaluate(() => JSON.parse(localStorage.getItem('nd-class')));
+ok(myCls && /^[a-z0-9]{8}$/.test(myCls.id) && myCls.secret.length === 32, 'class feed: class id and key kept on this device only');
 ok((await page.locator('#class-status').innerText()).includes('Your class: III CSE A'), 'class feed: class remembered for the CR');
 ok(await page.locator('#class-publish-btn').innerText() === 'Publish to III CSE A', 'class feed: publish button names the class');
 await page.locator('#class-publish-btn').click();
-await page.waitForFunction(() => /0 new, 3 updated/.test(document.querySelector('#class-result').innerText), null, { timeout: 5000 }).catch(() => {});
-ok(/0 new, 3 updated/.test(await page.locator('#class-result').innerText()), 'class feed: second publish updates, never duplicates');
-await page.waitForFunction(() => /3 events in III CSE A/.test(document.querySelector('#class-console-hint').innerText), null, { timeout: 5000 }).catch(() => {});
-ok(/3 events in III CSE A, 1 clash across the term/.test(await page.locator('#class-console-hint').innerText()), 'CR console: lists what is published with the term clash report', await page.locator('#class-console-hint').innerText());
-ok(await page.locator('#class-console-list li').count() === 4, 'CR console: 1 clash line + 3 events');
+await page.waitForFunction(() => /Nothing new/.test(document.querySelector('#class-preview-hint').innerText), null, { timeout: 8000 }).catch(() => {});
+ok(/Nothing new/.test(await page.locator('#class-preview-hint').innerText()) && await page.locator('#class-confirm-btn').isDisabled(), 'class feed: the same events again = "Nothing new", never duplicates');
+await page.locator('#class-preview-cancel').click();
+await page.waitForFunction(() => /3 upcoming events in III CSE A/.test(document.querySelector('#class-console-hint').innerText), null, { timeout: 8000 }).catch(() => {});
+ok(/3 upcoming events in III CSE A, 1 clash coming up/.test(await page.locator('#class-console-hint').innerText()), 'CR console: lists what is published with the clash report', await page.locator('#class-console-hint').innerText());
+ok(await page.locator('#class-console-list > li').count() === 4, 'CR console: 1 clash line + 3 events');
 page.once('dialog', (d) => d.accept());
 await page.locator('#class-console-list').getByRole('button', { name: /^Cancel Lab record/ }).click();
-await page.waitForFunction(() => /2 events in III CSE A/.test(document.querySelector('#class-console-hint').innerText), null, { timeout: 5000 }).catch(() => {});
-ok(/2 events in III CSE A/.test(await page.locator('#class-console-hint').innerText()) && (await page.locator('#class-console-list').innerText()).includes('(cancelled)'), 'CR console: Cancel marks the event cancelled for the class');
+await page.waitForFunction(() => /2 upcoming events in III CSE A/.test(document.querySelector('#class-console-hint').innerText), null, { timeout: 8000 }).catch(() => {});
+ok(/2 upcoming events in III CSE A/.test(await page.locator('#class-console-hint').innerText()) && (await page.locator('#class-console-list').innerText()).includes('(cancelled)'), 'CR console: Cancel marks the event cancelled for the class');
 const page5 = await context.newPage();
 page5.on('pageerror', (e) => errors.push(String(e)));
 await page5.goto(BASE, { waitUntil: 'networkidle' });
-await page5.locator('#class-join').fill('https://feed.test/c/abcd2345');
+await page5.locator('#class-join').fill(`${FEED}/c/${myCls.id}`);
 await page5.locator('#class-join-btn').click();
-await page5.waitForSelector('#event-list .ev', { timeout: 5000 }).catch(() => {});
+await page5.waitForSelector('#event-list .ev', { timeout: 8000 }).catch(() => {});
 ok(await page5.locator('#event-list .ev').count() === 2, 'class feed: student opens the class by link, 2 live events (the cancelled one is gone)');
 ok((await page5.locator('#shared-text').innerText()).includes('III CSE A'), 'class feed: banner names the class');
+ok(/Cancelled: Lab record submission/.test(await page5.locator('#shared-changes').innerText()), 'class feed: the student sees what changed', await page5.locator('#shared-changes').innerText());
 ok(await page5.locator('#gcal-all-btn').isEnabled() && await page5.locator('#export-btn').isEnabled(), 'class feed: student can add all in one tap');
-await page5.goto(`${BASE}#c=abcd2345`, { waitUntil: 'networkidle' });
-await page5.waitForSelector('#event-list .ev', { timeout: 5000 }).catch(() => {});
+await page5.goto(`${BASE}#c=${myCls.id}`, { waitUntil: 'networkidle' });
+await page5.waitForSelector('#event-list .ev', { timeout: 8000 }).catch(() => {});
 ok(await page5.locator('#event-list .ev').count() === 2, 'class feed: #c=<id> link opens the class directly');
 await page5.close();
 

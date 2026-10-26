@@ -411,4 +411,37 @@ test('Hinglish: "Room 12 me", a one-word "class" that is cancelled, "nahi hogi";
   assert.ok(k.warnings.some((w) => /cancels something/.test(w.msg)));
 });
 
+test('Example 13: a promo notice is the named challenge, not a "Practical" exam from "practical innovations"', () => {
+  const r = parseNotice(read('13-promo-challenge.txt'), { pastedAt });
+  assert.equal(r.events.length, 1);
+  const [e] = r.events;
+  assert.deepEqual([e.title, e.type, e.typeLabel, e.date, e.start, e.venue], ['Smart Campus Innovation Challenge', 'other', 'Challenge', '2026-10-28', '14:20', 'Room 208']);
+  assert.ok(!e.flags.some((f) => f.level === 'warn'), 'nothing to check: every field is written in the notice');
+  assert.match(calendarEntries(r.events)[0].summary, /🏆/);
+});
+
+test('"practical" is a test only as a noun', () => {
+  const noun = parseNotice('DBMS Practical on 5 Nov 2026 at 10 AM in Lab 2.', { pastedAt }).events;
+  assert.deepEqual(noun.map((e) => [e.type, e.typeLabel]), [['test', 'Practical']]);
+  const adj = parseNotice('Gain practical knowledge in the Python workshop on 5 Nov 2026 at 10 AM in Lab 2.', { pastedAt }).events;
+  assert.deepEqual(adj.map((e) => e.type), ['lecture']);
+  const lower = parseNotice('Students face many challenges. Meeting on 5 Nov 2026 at 3 PM in Room 4.', { pastedAt }).events;
+  assert.deepEqual(lower.map((e) => e.title), ['Meeting']);
+});
+
+test('A time on the next line is never the year ("Nov 13\\n0700 hrs" is 13 Nov at 7 AM, not the year 700)', () => {
+  const [e] = parseNotice('NCC parade Nov 13\n0700 hrs at the ground', { pastedAt }).events;
+  assert.deepEqual([e.date, e.start], ['2026-11-13', '07:00']);
+  const [f] = parseNotice('Viva on 13 Nov\n2026 batch students, 10 AM, Lab 2', { pastedAt }).events;
+  assert.equal(f.date, '2026-11-13');
+  assert.equal(parseNotice('Test on 13/11/0700 at 10 AM', { pastedAt }).events.every((x) => x.date === null || /^20/.test(x.date)), true);
+});
+
+test('A deadline inside a lecture with no end time is a clash (it used to crash the check, and the app said "No clashes")', () => {
+  const r = parseNotice('Guest lecture on 13 Nov 2026 at 11 AM in Seminar Hall. Submit the form by 11:30 AM on 13 Nov 2026.', { pastedAt });
+  const [row] = findClashes(r.events);
+  assert.equal(row.kind, 'deadline-inside');
+  assert.match(row.action, /before 11:00 AM/);
+});
+
 console.log(`\n${passed} passed`);

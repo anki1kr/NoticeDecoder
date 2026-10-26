@@ -11,14 +11,17 @@ const FAMILIES = [
   { fam: 'gd', type: 'test', re: /\b(?:[Gg]roup [Dd]iscussions?|GD)\b/ },
   { fam: 'interview', type: 'test', re: /\binterviews?\b/i },
   { fam: 'results', type: 'other', re: /\bresults?\b|परिणाम/i },
-  { fam: 'test', type: 'test', re: /\b(practical vivas?|lab vivas?|internal tests?|unit tests?|class tests?|slip tests?|surprise tests?|mock tests?|mid[- ]?(?:terms?|sems?|semesters?)(?: exams?| tests?)?|sessionals?(?: exams?)?|end[- ]?sem(?:ester)?(?: (?:exams?|practicals?))?|semester exams?|model exams?|lab exams?|re-?exams?|supplementary(?: exams?)?|backlog exams?|internal assessments?|examinations?|exams?|tests?|quiz(?:zes)?|viva(?: voce)?|practicals?|assessments?|aptitude|olympiad)\b/i },
+  // "practical" is a test only as a noun: "Practical on 5 Nov", not "practical innovations" or "practical knowledge".
+  { fam: 'test', type: 'test', re: /\b(practical vivas?|lab vivas?|internal tests?|unit tests?|class tests?|slip tests?|surprise tests?|mock tests?|mid[- ]?(?:terms?|sems?|semesters?)(?: exams?| tests?)?|sessionals?(?: exams?)?|end[- ]?sem(?:ester)?(?: (?:exams?|practicals?))?|semester exams?|model exams?|lab exams?|re-?exams?|supplementary(?: exams?)?|backlog exams?|internal assessments?|examinations?|exams?|tests?|quiz(?:zes)?|viva(?: voce)?|practicals?(?!\s+(?:innovations?|knowledge|skills?|experiences?|exposure|solutions?|approach(?:es)?|applications?|ideas?|problems?|learning|training|insights?|tips|uses?|implementations?|projects?|work|ways?|aspects?|understanding|examples?|guidance|purposes?|steps?|life|world|matters?|sense|demonstrations?|sessions?|orientation)\b)|assessments?|aptitude|olympiad)\b/i },
   { fam: 'test', type: 'test', re: /(परीक्षा|टेस्ट|क्विज़|क्विज|प्रैक्टिकल|मौखिकी)/u },
   // Exam acronyms are case-sensitive on purpose: "see" and "cat" are ordinary words.
   { fam: 'test', type: 'test', re: /\b(CIE|SEE|CAT[- ]?[12]|FAT|MST|EST)\b/ },
   { fam: 'deadline', type: 'deadline', re: /\b(submissions?|submit(?:ted)?|upload(?:ed|ing)?|deadline|last date|due(?! to)(?: date)?|registrations?|fee payment|fees?|pay(?:ment)?)\b/i },
   { fam: 'lecture', type: 'lecture', re: /\b((?:extra|remedial|make-?up|doubt|revision|bridge|special|additional|compensatory|substitute)\s+(?:class(?:es)?|lectures?|sessions?)|guest lectures?|expert lectures?|lectures?|classes|courses?|tutorials?|seminars?(?!\s+(?:hall|room))|webinars?|workshops?|masterclass(?:es)?|bootcamps?|sessions?|orientation|induction|talks?|trainings?)\b/i },
   { fam: 'lecture', type: 'lecture', re: /(व्याख्यान|कक्षा|सेमिनार|कार्यशाला|वेबिनार|सत्र)/u },
-  { fam: 'other', type: 'other', re: /\b(placement drives?|campus drives?|pool campus|drives?|fests?|hackathons?|(?:industrial|field|educational|study)\s+(?:visits?|trips?|tours?)|excursions?|meetings?|ceremony|convocation|competitions?|sports day|annual day|farewell|freshers?(?:['’]s)? party|cultural (?:fest|event|night)|parade|camp|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
+  { fam: 'other', type: 'other', re: /\b(placement drives?|campus drives?|pool campus|drives?|fests?|hackathons?|ideathons?|(?:industrial|field|educational|study)\s+(?:visits?|trips?|tours?)|excursions?|meetings?|ceremony|convocation|competitions?|contests?|tournaments?|symposi(?:um|a)|conclaves?|summits?|conferences?|exhibitions?|expos?|sports day|annual day|farewell|freshers?(?:['’]s)? party|cultural (?:fest|event|night)|parade|camp|joining(?: dates?)?|(?:project )?reviews?|presentations?|events?)\b/i },
+  // "Smart Campus Innovation Challenge": a named challenge is an event. Lower-case "challenges" in a sentence is not.
+  { fam: 'other', type: 'other', re: /\b((?:[Ii]nnovation|[Cc]oding|[Dd]esign|[Ss]tartup|[Ii]deation|[Cc]ase [Ss]tudy|[Pp]itch(?:ing)?)\s+[Cc]hallenges?|(?<![.!?]\s)(?<!^)Challenges?)\b/ },
   { fam: 'other', type: 'other', re: /(कार्यक्रम|प्रतियोगिता|बैठक|समारोह|उत्सव)/u },
 ];
 const TYPE_LABEL = { test: 'Test', deadline: 'Deadline', lecture: 'Lecture', other: 'Event' };
@@ -131,6 +134,7 @@ function labelFor(k) {
   if (k.fam === 'deadline') return 'Deadline';
   if (k.fam === 'results') return 'Results';
   if (k.fam === 'test') return /quiz|क्विज/.test(w) ? 'Quiz' : /exam|sem|cie|see|sessional|परीक्षा/.test(w) ? 'Exam' : /viva|मौखिकी/.test(w) ? 'Viva' : /practical|प्रैक्टिकल/.test(w) ? 'Practical' : 'Test';
+  if (/challenges?$/.test(w)) return 'Challenge';
   return cap(w === 'classes' ? 'class' : w.replace(/s$/, ''));
 }
 
@@ -545,7 +549,7 @@ export function parseNotice(text, { pastedAt = new Date(), source = 'text' } = {
     if (ev.zoom && !(ev.link && /zoom/i.test(ev.link))) ev.flags.push({ field: 'venue', level: 'warn', msg: 'The Zoom link is not in this message.' });
     if (!ev.venue && ev.link) { ev.venue = 'Online'; ev.why.venue = 'A joining link is given.'; }
     if (ev.end && toMin(ev.end) <= toMin(ev.start)) ev.flags.push({ field: 'end', level: 'warn', msg: 'End time is before the start. Please fix it.' });
-    if (source !== 'text' && ev.date) ev.flags.push({ field: 'date', level: 'warn', msg: 'Read from a photo: check the date and time against the picture.' });
+    if (source !== 'text' && source !== 'docx' && ev.date) ev.flags.push({ field: 'date', level: 'warn', msg: 'Read from a photo: check the date and time against the picture.' });
     delete ev.unit;
   }
   result.events = events;

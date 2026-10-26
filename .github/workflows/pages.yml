@@ -1,5 +1,5 @@
 # Runs the engine tests on every push. The site itself is published by GitHub Pages from the branch
-# (Settings > Pages > Deploy from a branch), so the app is at https://anki1kr.me/NoticeDecoder/app/
+# (Cloudflare Pages builds the branch), so the app is at https://noticedecoder.pages.dev/app/
 name: Tests
 
 on:
@@ -15,9 +15,13 @@ jobs:
         with:
           node-version: 22
       - run: node tests/engine.test.mjs
-      - run: node worker/test/feed.test.mjs
+      - run: node tests/fuzz.test.mjs
+      - run: node tests/files.test.mjs
+      - run: npm ci --prefix worker --no-audit --no-fund
+      - run: node worker/test/feed.test.mjs && node worker/test/room.test.mjs && node worker/test/ai.test.mjs
       - run: node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs
       - run: node companion/scripts/sync-engine.mjs && node companion/test/pipeline.test.mjs
-      - name: bundle and companion engine copy are up to date
+      - run: node tools/sync-extension.mjs
+      - name: bundle, companion and extension engine copies are up to date
         run: |
-          git diff --exit-code -- dist/notice-engine.js companion/engine/notice-engine.js || (echo 'run: node companion/scripts/sync-engine.mjs and commit' && exit 1)
+          git diff --exit-code -- dist/notice-engine.js companion/engine/notice-engine.js extension/engine.js || (echo 'run: node tools/bundle-engine.mjs && node companion/scripts/sync-engine.mjs && node tools/sync-extension.mjs, then commit' && exit 1)

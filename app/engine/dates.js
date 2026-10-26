@@ -12,6 +12,7 @@ const HINDI_MONTHS = [
   [9, 'सितंबर'], [9, 'सितम्बर'], [10, 'अक्टूबर'], [10, 'अक्तूबर'], [11, 'नवंबर'], [11, 'नवम्बर'], [12, 'दिसंबर'], [12, 'दिसम्बर'],
 ];
 const HMON = `(${HINDI_MONTHS.map(([, n]) => n).join('|')})`;
+const YEAR = String.raw`(?:19|20)\d{2}`;
 export const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export const pad = (n) => String(n).padStart(2, '0');
@@ -82,18 +83,19 @@ function findDatesIn(text) {
   const free = (s, e) => !taken.some(([a, b]) => s < b && e > a);
   const push = (tok) => { out.push(tok); taken.push([tok.s, tok.e]); };
 
-  const dayMonth = new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?${MON}\b\.?(?:,?\s*(\d{4})\b)?`, 'gi');
+  // The year sits on the same line and looks like one: "Nov 13\n0700 hrs" is a date and a time, not the year 700.
+  const dayMonth = new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?${MON}\b\.?(?:,?[ \t]*(${YEAR})\b)?`, 'gi');
   for (const m of text.matchAll(dayMonth)) {
     const d = +m[1], mo = MONTHS[m[2].slice(0, 3).toLowerCase()];
     if (d >= 1 && d <= 31) push({ kind: 'abs', s: m.index, e: m.index + m[0].length, d, m: mo, y: m[3] ? +m[3] : null, raw: m[0] });
   }
-  const monthDay = new RegExp(String.raw`\b${MON}\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4})\b)?`, 'gi');
+  const monthDay = new RegExp(String.raw`\b${MON}\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?[ \t]*(${YEAR})\b)?`, 'gi');
   for (const m of text.matchAll(monthDay)) {
     const s = m.index, e = s + m[0].length, d = +m[2];
     if (d >= 1 && d <= 31 && free(s, e)) push({ kind: 'abs', s, e, d, m: MONTHS[m[1].slice(0, 3).toLowerCase()], y: m[3] ? +m[3] : null, raw: m[0] });
   }
   // Hindi: "13 नवंबर 2026", "१३ नवम्बर"
-  const hindiDayMonth = new RegExp(String.raw`(?<!\d)(\d{1,2})\s*${HMON}(?:,?\s*(\d{4})(?!\d))?`, 'gu');
+  const hindiDayMonth = new RegExp(String.raw`(?<!\d)(\d{1,2})\s*${HMON}(?:,?[ \t]*(${YEAR})(?!\d))?`, 'gu');
   for (const m of text.matchAll(hindiDayMonth)) {
     const s = m.index, e = s + m[0].length, d = +m[1];
     const mo = HINDI_MONTHS.find(([, n]) => n === m[2])[0];
@@ -104,7 +106,7 @@ function findDatesIn(text) {
     const s = m.index, e = s + m[0].length, y = +m[1], mo = +m[2], d = +m[3];
     if (free(s, e) && validDate(y, mo, d) && y >= 2000 && y <= 2099) push({ kind: 'abs', s, e, d, m: mo, y, raw: m[0], isoForm: true });
   }
-  for (const m of text.matchAll(/\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})\b/g)) {
+  for (const m of text.matchAll(/\b(\d{1,2})[/.-](\d{1,2})[/.-]((?:19|20)\d{2}|\d{2})\b/g)) {
     const s = m.index, e = s + m[0].length;
     const a = +m[1], b = +m[2];
     if (!free(s, e) || a < 1 || a > 31 || b < 1 || b > 12) continue;

@@ -2,7 +2,7 @@
 //
 // GOOGLE_CLIENT_ID powers "Add all to Google Calendar" (one tap, no .ics). Create it once:
 //   Google Cloud console -> APIs & Services -> Credentials -> Create credentials -> OAuth client ID
-//   -> Web application; Authorised JavaScript origins: https://anki1kr.me and http://127.0.0.1:8771
+//   -> Web application; Authorised JavaScript origins: https://noticedecoder.pages.dev, https://anki1kr.me and http://127.0.0.1:8771
 //   (no redirect URIs: the page uses the Google Identity Services token flow).
 //   Enable "Google Calendar API" for the project. The scope is calendar.app.created (non-sensitive), so publish the
 //   OAuth consent screen "In production": no test-user list and no unverified-app screen.

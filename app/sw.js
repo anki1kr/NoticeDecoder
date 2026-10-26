@@ -4,7 +4,7 @@
 // Also: (1) the share target for FILES (WhatsApp -> Share -> a PDF or photo) arrives as a POST; it is parked in a
 // cache and the page is sent to ./?shared=file to pick it up; (2) the OCR / PDF libraries and the OCR language models
 // come from two CDNs on first use and are cached, so the second photo works offline too.
-const VERSION = 'nd-v16';
+const VERSION = 'nd-v17';
 const SHELL = [
   './',
   './index.html',
@@ -13,6 +13,8 @@ const SHELL = [
   './schedule.js',
   './ocr.js',
   './pdftext.js',
+  './docx.js',
+  './ai.js',
   './config.js',
   './samples.js',
   './styles.css',
