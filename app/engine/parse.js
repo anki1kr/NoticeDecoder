@@ -40,8 +40,10 @@ const GENERIC = new Set('event events test tests exam exams quiz deadline lectur
 // Hindi function words that never name an event.
 const HINDI_STOP = 'की का के को में पर से और है हैं होगी होगा होंगे एवं तथा या कि'.split(' ');
 // Place words. Indian campuses also say "LT-3" (lecture theatre), "CR-2" (classroom), "Lab-II", "Block A-204", "SH 1".
-// A wide gap counts as a separator too: posters set date, place and time in columns ("28 October 2026  Room 208  2:20 PM").
-const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*|\S {2,})((?:[A-Za-z]+\s+){0,2}?(?:(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b(?:-?\d{1,3})?|\s*(?:no\.?\s*)?[A-Z]?-?(?:\d{1,4}[A-Za-z]?|[IVX]{1,4}))?|(?:LT|CR|SH|LH|TH)[- ]?(?:\d{1,3}|[IVX]{1,4})\b))\b/i;
+const PLACE = /(?:\b(?:in|at|to|from|inside|near)\s+(?:the\s+)?|\bvenue(?:\s+(?:remains|is|will be))?\s*[:\-–]?\s*|📍\s*|,\s*)((?:[A-Za-z]+\s+){0,2}?(?:(?:room|hall|lab|laboratory|auditorium|office|block|ground|library|classroom|campus|centre|center|building|theatre|theater)(?:\s+[A-H]\b(?:-?\d{1,3})?|\s*(?:no\.?\s*)?[A-Z]?-?(?:\d{1,4}[A-Za-z]?|[IVX]{1,4}))?|(?:LT|CR|SH|LH|TH)[- ]?(?:\d{1,3}|[IVX]{1,4})\b))\b/i;
+// Posters set date, place and time in columns ("28 October 2026  Room 208  2:20 PM"): after a wide gap, a place word
+// counts only with its number, so "Submit  lab records" (a double space in pasted text) is no venue.
+const COLUMN_PLACE = /\S {2,}((?:room|hall|lab|auditorium|block|classroom|library)\s*(?:no\.?\s*)?[A-Z]?-?\d{1,4}[A-Za-z]?)\b/i;
 // Hinglish puts the place first: "Room 12 me", "Lab 3 mein".
 const HINGLISH_PLACE = /\b((?:room|hall|lab|auditorium|block|classroom|library|seminar hall)\s*(?:no\.?\s*)?[A-Z]?-?\d{1,4}[A-Za-z]?)\s+(?:me|mein|mai|mei)\b/i;
 const ONLINE = /\b(zoom|google meet|ms teams|microsoft teams|webex|youtube live)\b/i;
@@ -255,6 +257,8 @@ function venueFor(u) {
   }
   const p = PLACE.exec(u.text);
   if (p) { const s = u.s + p.index + p[0].indexOf(p[1]); return { venue: cap(p[1]), span: [s, s + p[1].length], why: `Place word found: "${p[1]}".` }; }
+  const col = COLUMN_PLACE.exec(u.text);
+  if (col) { const s = u.s + col.index + col[0].indexOf(col[1]); return { venue: cap(col[1]), span: [s, s + col[1].length], why: `Place word found: "${col[1]}".` }; }
   const hing = HINGLISH_PLACE.exec(u.text);
   if (hing) return { venue: cap(hing[1]), span: [u.s + hing.index, u.s + hing.index + hing[1].length], why: `Place word found: "${hing[0]}".` };
   const o = ONLINE.exec(u.text);

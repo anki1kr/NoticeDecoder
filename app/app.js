@@ -95,6 +95,9 @@ const els = {
   classSection: $('#class-section'),
   classStatus: $('#class-status'),
   classPublish: $('#class-publish-btn'),
+  crEntry: $('#cr-entry'),
+  crEntryBtn: $('#cr-entry-btn'),
+  crEntryNote: $('#cr-entry-note'),
   classLink: $('#class-link-btn'),
   classJoin: $('#class-join'),
   classJoinBtn: $('#class-join-btn'),
@@ -1220,8 +1223,11 @@ function setClassBusy(on) {
 function renderClass() {
   els.classSection.hidden = !feedBase() || (els.results.hidden && !myClass());
   els.classOpenRow.hidden = !feedBase();
+  els.crEntry.hidden = !feedBase();
   if (!feedBase()) return;
   const c = myClass();
+  els.crEntryBtn.textContent = c ? `Your class ${c.name}: publish or manage` : 'Class representative? Publish notices to your whole class';
+  if (!els.classSection.hidden) els.crEntryNote.hidden = true;
   els.classStatus.replaceChildren(c
     ? el('span', {}, `Your class: ${c.name}. Subscribe page: `, el('a', { href: c.page, target: '_blank', rel: 'noopener' }, c.page))
     : 'No class yet. The first publish creates one and gives you its subscribe link.');
@@ -1232,6 +1238,23 @@ function renderClass() {
   const f = followed();
   els.followRow.hidden = !f || Boolean(c && c.id === f.id);
   if (f) els.followText.textContent = `Your class: ${f.name}${f.fresh ? ` · ${f.fresh} change${f.fresh === 1 ? '' : 's'} since you last opened it` : ''}`;
+}
+
+// The class calendar sits at the end of the results, so a class rep would never find it. This entry in the paste card
+// leads there; before any notice is decoded it says what to do first.
+function goToClass() {
+  if (!els.classSection.hidden) {
+    els.classSection.scrollIntoView({ block: 'start' });
+    // Publish is off while fields need a check or nothing is decoded: land on the heading instead (a heading takes focus
+    // only with tabindex -1), so keyboard and screen-reader users still arrive at the class calendar.
+    const target = els.classPublish.disabled ? els.classSection.querySelector('h2') : els.classPublish;
+    if (target.tagName === 'H2') target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    return;
+  }
+  els.crEntryNote.textContent = 'Paste or upload the notice above and decode it. "Publish to class" at the end sends its events to your class, who subscribe once by link or QR.';
+  els.crEntryNote.hidden = false;
+  els.input.focus();
 }
 
 const publishPayload = () => state.events.map(({ title, type, typeLabel, date, start, end, venue, link, durationMin, repeat, every, point, window: w, reportAt, moved }) =>
@@ -1822,6 +1845,7 @@ function init() {
     els.noticeText.addEventListener(type, (e) => setHot(e, false));
   }
   els.classPublish.addEventListener('click', publishToClass);
+  els.crEntryBtn.addEventListener('click', goToClass);
   els.classConfirm.addEventListener('click', confirmPublish);
   els.classPreviewCancel.addEventListener('click', cancelPreview);
   els.classLink.addEventListener('click', copyClassLink);

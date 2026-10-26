@@ -46,6 +46,11 @@ for (const f of ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-m
   ok(r.status() === 200, `GET ${f} 200`);
 }
 
+// 0. Class rep entry: visible before any notice; before decoding it says what to do and puts the cursor in the paste box
+ok(await page.locator('#cr-entry-btn').isVisible(), 'class rep entry visible before any notice');
+await page.locator('#cr-entry-btn').click();
+ok(await page.locator('#cr-entry-note').isVisible() && await page.evaluate(() => document.activeElement?.id === 'notice-input'), 'class rep entry before decoding: says what to do, cursor in the paste box');
+
 // 1. PDF sample: 3 events, 2 clashes, export open
 await page.getByRole('button', { name: 'Exam day clash (PDF sample)' }).click();
 await page.waitForSelector('#event-list .ev');
@@ -57,6 +62,10 @@ await page.locator('#event-list .row').first().getByRole('button', { name: /^Edi
 ok(await page.locator('#event-list article.card').count() === 1, 'Edit opens the full card for one event');
 ok(await page.locator('.ev [data-field="link"] input').count() === 1 && await page.locator('.ev [data-field="durationMin"] input').count() === 1, 'card has Link and Takes (minutes) fields');
 await page.screenshot({ path: 'tmp/shot-pdf-390.png', fullPage: true });
+await page.locator('#cr-entry-btn').click();
+ok(await page.evaluate(() => { const r = document.querySelector('#class-section').getBoundingClientRect(); return r.top >= -2 && r.top < innerHeight && document.activeElement?.id === 'class-publish-btn'; }), 'class rep entry after decoding: jumps to the class calendar, Publish focused');
+ok(await page.locator('#cr-entry-note').isHidden(), 'class rep entry: the before-decoding note is gone once the class calendar shows');
+await page.evaluate(() => scrollTo(0, 0));
 
 // 2. Edit: lecture start 11:30 -> the 30 min overlap is gone
 await page.locator('#event-list .ev').filter({ hasText: 'AI in Healthcare' }).getByRole('button', { name: /^Edit/ }).click();
@@ -183,6 +192,10 @@ ok(await page.locator('#event-list .ev').count() === 5, 'timetable chip: 5 event
 ok(await page.locator('#event-list article.card').count() === 1 && await page.locator('#event-list .row').count() === 4, 'timetable chip: only the amber one is a form, the other four are rows');
 ok((await page.locator('#event-list').innerText()).includes('is a Friday'), 'timetable chip: weekday mismatch shown on the card');
 ok(await page.locator('#export-btn').isDisabled(), 'timetable chip: export locked by the amber flag');
+// Publish is off while a field is amber: the class rep entry still lands on the class calendar (its heading)
+await page.locator('#cr-entry-btn').click();
+ok(await page.evaluate(() => document.activeElement?.id === 'class-title' || document.activeElement === document.querySelector('#class-section h2')), 'class rep entry with Publish off: focus lands on the class calendar heading');
+await page.evaluate(() => scrollTo(0, 0));
 await page.locator('#event-list .ev').first().getByRole('button', { name: 'Looks right' }).click();
 ok(await page.locator('#export-btn').isEnabled(), 'timetable chip: Looks right opens the export');
 await page.screenshot({ path: 'tmp/shot-timetable-390.png', fullPage: true });

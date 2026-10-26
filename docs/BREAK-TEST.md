@@ -28,6 +28,14 @@ AI check.
 | `PATCH /api/class/<id>/anything` with a name | Renamed the class | 404 | worker feed test |
 | Class name sent as an object | Stored as "[object Object]" | 400 | worker feed test |
 
+## Found after the break test (26 Oct 2026, evening)
+
+| What a user does | What used to happen | Now | Test |
+|---|---|---|---|
+| Uploads a 1024 px photo of the IIC poster (date, venue and timing in dark panels side by side) | Read as "2 October" and "Room 205", and a "Test" event from the poster's "Code / Build / Test" steps | 28 Oct, 2:20 PM, Room 208, named "Smart Campus Innovation Challenge": a mostly dark picture is read with Tesseract's layout analysis, a weekday right before a written date of that weekday is that date's name | engine + break-check (OCR) |
+| Opens, offline, a class opened before (after the class-feed freshness change) | "You are offline": no-cache cannot revalidate without a network | A GET falls back to the browser's copy | break-check |
+| Pastes text with a double space before a place word ("Submit  lab records") | Venue "Lab" (the poster column rule took any place word after a wide gap) | After a wide gap a place word counts only with its number ("Room 208") | engine |
+
 ## Also checked and already safe
 
 Empty box, 10-letter notices, emoji-only notices, 200 KB pastes (decode + render about 1 s), 100,000 characters with no
@@ -49,5 +57,5 @@ node tools/feed-dev.mjs --port 8787 --fake-ai                     # terminal 2
 node tools/ui-check.mjs && node tools/break-check.mjs              # OCR_CHECKS=1 for photos too
 ```
 
-Last run (26 Oct 2026): engine 44, fuzz (30,000 notices over 5 seeds), files 7, worker 18 + rooms 6 + AI 10, Gmail 7, companion 5,
-ui-check 84/84, break-check 80/80 with OCR, including the real IIC poster photo (28 Oct, 2:20 PM read from the picture).
+Last run (26 Oct 2026, evening): engine 45, fuzz (30,000 notices over 5 seeds), files 7, worker 18 + rooms 6 + AI 10, Gmail 7, companion 5,
+ui-check 89/89, break-check 80/80 with OCR, including the real IIC poster photo (28 Oct, 2:20 PM read from the picture).

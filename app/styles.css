@@ -338,6 +338,9 @@ a, .link { text-underline-offset: 3px; }
 .console-clash { color: #78350f; }
 .console-cancelled { color: var(--muted); text-decoration: line-through; }
 #class-open-row { margin-top: 16px; }
+.cr-entry { margin: 14px 0 0; }
+.cr-entry .link { padding: 4px 0; min-height: 32px; font-size: 15px; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+#cr-entry-note { margin: 4px 0 0; }
 .join-row { align-items: stretch; }
 .join-row input { flex: 1 1 220px; }
 #class-section .lbl { margin-top: 16px; }

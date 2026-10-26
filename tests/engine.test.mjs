@@ -457,6 +457,9 @@ test('Poster photo: the weekday over a written date names that date, and a colum
   // with the poster's name read too, the unnamed event takes it
   const [named] = parseNotice(`Activity\n(Q-, Smart Campus Innovation Challenge\n${ocr}`, { pastedAt, source: 'photo' }).events;
   assert.equal(named.title, 'Smart Campus Innovation Challenge');
+  // a double space in pasted text is no column: a place word needs its number there ("Room 208", not "lab records")
+  assert.equal(parseNotice('Submit  lab records by 5 PM on 3 Nov 2026.', { pastedAt }).events[0].venue, null);
+  assert.equal(parseNotice('Viva on 3 Nov 2026  Lab 3  10 AM', { pastedAt }).events[0].venue, 'Lab 3');
 });
 
 console.log(`\n${passed} passed`);
