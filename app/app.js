@@ -447,7 +447,9 @@ async function togglePush() {
     await cache.put('./push-class', new Response(JSON.stringify({ id: cls, name, feed: feedBase(), seen: new Date().toISOString() }), { headers: { 'content-type': 'application/json' } }));
     if (reg.showNotification) reg.showNotification(`${name}: notifications on`, { body: 'You will hear when a notice is published or changed, and before each event.', icon: './icon-192.png', tag: 'nd-on' }).catch(() => {});
   } catch (err) {
-    state.pushNote = /denied|permission/i.test(String(err?.message)) ? 'Notifications were not allowed.' : friendlyNet(err);
+    const msg = String(err?.message || '');
+    state.pushNote = /incognito|private/i.test(msg) ? 'Notifications do not work in an incognito or private window. Open the app in a normal window.'
+      : /denied|permission/i.test(msg) ? 'Notifications were not allowed.' : /push service|registration failed|AbortError/i.test(`${err?.name} ${msg}`) ? 'Your browser could not set up notifications (no push service). On Android, open the app in Chrome; on iPhone, add it to the home screen first.' : friendlyNet(err);
   } finally {
     state.pushBusy = false;
     renderPush();
