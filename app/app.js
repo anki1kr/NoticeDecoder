@@ -131,6 +131,9 @@ const els = {
   aiToggle: $('#ai-toggle'),
   aiBtn: $('#ai-btn'),
   aiStatus: $('#ai-status'),
+  joinRow: $('#join-row'),
+  joinBtn: $('#join-btn'),
+  joinNote: $('#join-note'),
   pushRow: $('#push-row'),
   pushBtn: $('#push-btn'),
   pushNote: $('#push-note'),
@@ -152,6 +155,8 @@ const state = {
   aiBusy: false,
   aiServer: null,   // null = not asked yet, true/false = the class server has an AI key
   pushKey: null,    // the server's VAPID public key, or null when it cannot send notifications
+  googleJoin: false, // the server can take "Join with Google" (client secret set)
+  joined: null,     // ?joined=<email> on the way back from Google
   pushBusy: false,
   pushNote: null,   // the last error from turning notifications on, shown until the next try
   aiUndo: null,     // the events as they were before the AI check, for Undo
@@ -391,9 +396,11 @@ async function askAiServer() {
     const h = await res.json();
     state.aiServer = Boolean(h.ai);
     state.pushKey = typeof h.push === 'string' ? h.push : null;
+    state.googleJoin = Boolean(h.google);
   } catch { state.aiServer = false; }
   renderAi();
   renderPush();
+  renderJoin();
 }
 
 // ---------- notifications: the class server wakes this phone when the CR publishes, and before each event ----------
@@ -403,6 +410,21 @@ const PUSH_KEY = 'nd-push'; // { id, name, endpoint }
 const pushState = () => { try { return JSON.parse(localStorage.getItem(PUSH_KEY) || 'null'); } catch { return null; } };
 const savePush = (v) => { try { if (v) localStorage.setItem(PUSH_KEY, JSON.stringify(v)); else localStorage.removeItem(PUSH_KEY); } catch { /* ignore */ } };
 const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && location.protocol !== 'file:';
+
+// "Join with Google": the server then writes every notice into this student's Google Calendar, forever. The sign-in
+// happens on the class server (it keeps the refresh token); the app only sends the student there and welcomes them back.
+function renderJoin() {
+  const cls = state.shared?.classId;
+  const can = Boolean(cls) && state.googleJoin;
+  els.joinRow.hidden = !can;
+  if (!can) return;
+  els.joinBtn.href = `${feedBase()}/oauth/start?class=${cls}&back=app`;
+  const j = state.joined;
+  els.joinNote.textContent = j == null ? 'One tap now; nothing to tap per notice. Reminders come from Google Calendar itself.'
+    : j === 'no' ? 'Google sign-in was cancelled or failed. Try again.' : j === 'norefresh' ? 'Google did not give long-term access. Remove Notice Decoder at myaccount.google.com/permissions, then join again.'
+      : j === 'full' ? 'This class is full.' : `Joined as ${j}. Every notice now lands in your Google Calendar (the "Notice Decoder" calendar; tick it once in the app if it is hidden).`;
+  if (j && !['no', 'norefresh', 'full'].includes(j)) els.joinBtn.textContent = 'Joined with Google';
+}
 
 function renderPush() {
   const cls = state.shared?.classId;
@@ -523,6 +545,7 @@ function renderAll() {
   renderAi();
   renderClass();
   renderPush();
+  renderJoin();
 }
 const CHANGE_WORDS = { added: 'New', moved: 'Moved', updated: 'Updated', cancelled: 'Cancelled', restored: 'Back on' };
 
@@ -1935,6 +1958,8 @@ function init() {
   els.aiToggle.addEventListener('change', () => { try { localStorage.setItem(AI_KEY, els.aiToggle.checked ? '1' : '0'); } catch { /* ignore */ } });
   renderClass();
   const classInHash = () => { const m = /[#&]c=([a-z0-9]{6,12})\b/.exec(location.hash); return m && feedBase() ? openClass(m[1]) : false; };
+  const q = new URLSearchParams(location.search);
+  if (q.has('joined')) { state.joined = q.get('joined'); history.replaceState(null, '', location.pathname + location.hash); }
   const keyInHash = () => { const m = /[#&]cr=([a-z0-9]{6,12})\.([a-z0-9]{8,64})\b/.exec(location.hash); return m && feedBase() ? (importClassKey(m[1], m[2]), true) : false; };
   window.addEventListener('hashchange', () => { if (!keyInHash() && !loadShared(location.hash) && !classInHash() && state.shared) clearAll(); });
   setupInstall();

@@ -21,10 +21,29 @@ function eventRow(e) {
     + `${e.venue ? `<span class="where">📍 ${esc(e.venue)}</span>` : ''}${e.link ? `<a class="where" href="${esc(e.link)}" rel="noopener nofollow" target="_blank">🔗 Joining link</a>` : ''}</span></li>`;
 }
 
-export function subscribePage({ cls, id, origin, appUrl, today, clashes, changes }) {
+// The one-tap box: Join with Google (the server writes every notice into the student's calendar from then on).
+function joinBox({ google, me, joined, written, origin, id, upcoming }) {
+  if (!google) return '';
+  const start = `${origin}/oauth/start?class=${id}`;
+  if (me && !me.revoked) {
+    return `<section class="card join" aria-label="Joined"><h2>✅ Joined${me.email ? ` as ${esc(me.email)}` : ''}</h2>
+<p class="big">Every notice this class publishes goes into <b>your Google Calendar</b> by itself, with reminders. Nothing more to do.${joined && written ? ` <span class="ok">${esc(written)} event${written === '1' ? '' : 's'} written just now.</span>` : ''}</p>
+<p><small>Look for the calendar named <b>Notice Decoder</b> in the Google Calendar app (☰ menu). If it is not ticked, tick it once.</small></p>
+<form method="post" action="${origin}/api/class/${id}/leave" onsubmit="return confirm('Leave? New notices will stop going to your calendar.')"><button class="btn" type="submit">Leave this class</button></form></section>`;
+  }
+  const note = joined === 'no' ? '<p class="warn">Google sign-in was cancelled or failed. Try again.</p>'
+    : joined === 'norefresh' ? '<p class="warn">Google did not give long-term access. Remove Notice Decoder at myaccount.google.com/permissions, then join again.</p>'
+      : joined === 'full' ? '<p class="warn">This class is full.</p>' : me?.revoked ? '<p class="warn">Your Google access was removed. Join again to continue.</p>' : '';
+  return `<section class="card join" aria-label="Join"><h2>One tap, then never again</h2>
+<p class="big">Join with Google once. From then on every notice the class representative publishes lands in <b>your Google Calendar</b> on its own, with a reminder before each event. ${upcoming ? `${upcoming} upcoming event${upcoming === 1 ? '' : 's'} go in right away.` : ''}</p>
+${note}<div class="btns"><a class="btn p" href="${esc(start)}">Join with Google</a></div>
+<p><small>Only a calendar named "Notice Decoder" that we create is touched; we cannot see your other events.</small></p></section>`;
+}
+
+export function subscribePage({ cls, id, origin, appUrl, today, clashes, changes, google = false, me = null, joined = null, written = null }) {
   const feed = `${origin}/c/${id}.ics`;
   const webcal = feed.replace(/^https?:/, 'webcal:');
-  const google = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`;
+  const googleSub = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`;
   const page = `${origin}/c/${id}`;
   const all = Object.values(cls.events).filter((e) => !e.cancelled).sort((a, b) => `${a.date}${a.start || ''}`.localeCompare(`${b.date}${b.start || ''}`));
   const upcoming = all.filter((e) => e.date >= today);
@@ -57,6 +76,7 @@ ul{list-style:none;margin:0;padding:0}.day{margin:14px 0 6px;font-weight:700;fon
 li.ev{display:grid;grid-template-columns:7.5em 1fr;gap:8px;padding:10px 0;border-top:1px solid var(--line)}li.ev:first-child{border-top:0}
 .when{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.92rem}.what b{display:block}.where{display:block;color:var(--muted);font-size:.92rem}
 .clash{background:var(--warn-bg);border-color:var(--warn)}.clash h2{color:var(--warn)}.clash li{margin:6px 0}
+.join{border:2px solid var(--brand);background:var(--card)}.join h2{margin-bottom:6px}.join .big{font-size:1.05rem}.ok{color:var(--ok);font-weight:700}.warn{color:var(--warn);font-weight:700}
 .tag{display:inline-block;font-size:.75rem;font-weight:700;padding:1px 8px;border-radius:99px;border:1px solid var(--line);margin-right:4px}.k-cancelled{color:var(--warn);border-color:var(--warn)}.k-moved{color:var(--brand);border-color:var(--brand)}
 #qr{display:none;text-align:center}#qr svg{width:min(320px,80vw);height:auto;background:#fff;padding:10px;border-radius:8px}details summary{cursor:pointer;font-weight:600}
 @media (max-width:420px){li.ev{grid-template-columns:1fr}}
@@ -64,7 +84,8 @@ li.ev{display:grid;grid-template-columns:7.5em 1fr;gap:8px;padding:10px 0;border
 <h1>${esc(cls.name)}</h1>
 <p class="sub">One calendar for the whole class. Subscribe once; when the class representative publishes a new or changed notice, your calendar updates by itself.</p>
 <section class="card" aria-label="Subscribe">
-<div class="btns"><a class="btn p" href="${esc(google)}">Add to Google Calendar</a><a class="btn" href="${esc(webcal)}">Apple / Outlook</a>${app ? `<a class="btn" href="${esc(app)}">Open in Notice Decoder</a>` : ''}<button class="btn" type="button" id="qr-btn" hidden>Show QR code</button></div>
+${joinBox({ google, me, joined, written, origin, id, upcoming: upcoming.length })}
+<div class="btns">${google ? '' : `<a class="btn p" href="${esc(googleSub)}">Add to Google Calendar</a>`}<a class="btn" href="${esc(webcal)}">Apple / Outlook${google ? ' (subscribe)' : ''}</a>${app ? `<a class="btn" href="${esc(app)}">Open in Notice Decoder</a>` : ''}<button class="btn" type="button" id="qr-btn" hidden>Show QR code</button></div>
 <div id="qr" aria-label="QR code of this page"></div>
 <p><small>Google refreshes subscribed calendars every 12 to 24 hours; Apple and Outlook about every hour; the Notice Decoder app shows changes at once. Feed: <code>${esc(feed)}</code></small></p>
 </section>

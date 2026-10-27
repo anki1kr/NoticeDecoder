@@ -18,7 +18,7 @@ jobs:
       - run: node tests/fuzz.test.mjs
       - run: node tests/files.test.mjs
       - run: npm ci --prefix worker --no-audit --no-fund
-      - run: node worker/test/feed.test.mjs && node worker/test/room.test.mjs && node worker/test/push.test.mjs && node worker/test/ai.test.mjs
+      - run: node worker/test/feed.test.mjs && node worker/test/room.test.mjs && node worker/test/push.test.mjs && node worker/test/google.test.mjs && node worker/test/ai.test.mjs
       - run: node tools/bundle-engine.mjs && node integrations/gmail-apps-script/test/run.mjs
       - run: node companion/scripts/sync-engine.mjs && node companion/test/pipeline.test.mjs
       - run: node tools/sync-extension.mjs

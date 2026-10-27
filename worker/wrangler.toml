@@ -18,6 +18,9 @@ AI_DAILY_CAP = "300"
 # Web Push (VAPID). The private half is the secret VAPID_PRIVATE_JWK (node vapid-keygen.mjs | npx wrangler secret put VAPID_PRIVATE_JWK).
 VAPID_PUBLIC = "BJjYSp7cWtY23hqz7z79kwV-h6wcANkdeTuDLanFqNbp3emOI5x_r0EinUnqbFqaUFGSliVGBR8G2pa7gHtVDXE"
 VAPID_SUBJECT = "mailto:ankit25679@gmail.com"
+# "Join with Google" (server-side calendar writes). Secrets: GOOGLE_CLIENT_SECRET, TOKEN_KEY (32 random bytes, base64url).
+# The OAuth client must list <worker origin>/oauth/callback as an authorised redirect URI.
+GOOGLE_CLIENT_ID = "1048623925742-fu9isnfo2ueuj3o77jgp9sej4ou2upub.apps.googleusercontent.com"
 
 [[kv_namespaces]]
 binding = "CLASSES"

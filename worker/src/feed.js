@@ -53,6 +53,8 @@ export function upgrade(cls) {
   cls.stats = cls.stats || { publishes: 0, revised: 0, cancelled: 0, clashSeen: [] };
   cls.stats.clashSeen = cls.stats.clashSeen || [];
   cls.changes = Array.isArray(cls.changes) ? cls.changes : [];
+  cls.members = cls.members && typeof cls.members === 'object' ? cls.members : {};
+  cls.syncQueue = Array.isArray(cls.syncQueue) ? cls.syncQueue : [];
   cls.v = 2;
   return cls;
 }

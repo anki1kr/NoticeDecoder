@@ -18,6 +18,7 @@ import { MAX_EVENTS, cleanEvent, upgrade, plan, apply, edit, setCancelled, liveE
 import { subscribePage } from './page.js';
 import { refine } from './ai.js';
 import { addSubscription, removeSubscription, pushAll, pushConfigured, nextReminder, dueReminders } from './push.js';
+import { googleConfigured, startUrl, readState, exchangeCode, addMember, removeMember, syncMember, queueAll, drainQueue, memberSummary } from './google.js';
 
 const MAX_BODY = 128 * 1024;
 const MAX_INCOMING = 100;
@@ -89,6 +90,34 @@ export async function handle(request, env, { newId } = {}) {
   try {
     if (request.method === 'POST' && path === '/api/ai/refine') return await refine(request, env, { json, ip, today });
 
+    // "Join with Google": off to Google's consent screen, the class id signed into `state`.
+    if (request.method === 'GET' && path === '/oauth/start') {
+      if (!googleConfigured(env)) return text('Google sign-in is not set up on this server.', 503, 'text/plain; charset=utf-8');
+      const classId = url.searchParams.get('class') || '';
+      if (!validId(classId)) return text('Which class? Open the class link and press Join there.', 400, 'text/plain; charset=utf-8');
+      return Response.redirect(await startUrl(env, { classId, back: url.searchParams.get('back'), origin: url.origin }), 302);
+    }
+    // Back from Google (routed to the class's own object by `route`).
+    if (request.method === 'GET' && path === '/oauth/callback') {
+      const st = await readState(env, url.searchParams.get('state'));
+      const page = (id) => `${url.origin}/c/${id}`;
+      if (!st) return text('This sign-in link is not valid any more. Open the class link and press Join again.', 400, 'text/plain; charset=utf-8');
+      const back = (q) => Response.redirect(st.b === 'app' && env.APP_URL ? `${env.APP_URL}?${q}#c=${st.c}` : `${page(st.c)}?${q}`, 302);
+      if (url.searchParams.get('error')) return back('joined=no');
+      const cls = await loadClass(env, st.c);
+      if (!cls) return text('No such class.', 404, 'text/plain; charset=utf-8');
+      let who;
+      try { who = await exchangeCode(env, { code: url.searchParams.get('code') || '', origin: url.origin }); } catch (err) { console.error('oauth exchange', err.message); return back(err.code === 'no_refresh' ? 'joined=norefresh' : 'joined=no'); }
+      if (!addMember(cls, who)) return back('joined=full');
+      await saveClass(env, st.c, cls);
+      const r = await syncMember(env, cls, who.sub, { all: true }); // the events are there before the page comes back
+      await saveClass(env, st.c, cls);
+      if (env.AFTER_CHANGE) env.AFTER_CHANGE(cls, { silent: true });
+      const cookie = `nd_member_${st.c}=${encodeURIComponent(who.sub)}; Path=/; Max-Age=31536000; Secure; HttpOnly; SameSite=Lax`;
+      const res = back(`joined=${encodeURIComponent(who.email || 'yes')}&written=${r.written}`);
+      return new Response(null, { status: 302, headers: { location: res.headers.get('location'), 'set-cookie': cookie } });
+    }
+
     // Create a class
     if (request.method === 'POST' && path === '/api/class') {
       if (await limited(env.CREATE_LIMIT, ip)) return json({ error: 'Too many classes created from this network. Wait a minute.' }, 429, { 'retry-after': '60' });
@@ -104,11 +133,20 @@ export async function handle(request, env, { newId } = {}) {
       return json({ id, secret, name, ...urls(url.origin, id) }, 201);
     }
 
-    let m = /^\/api\/class\/([^/]+)(?:\/(publish|events|rotate|push))?(?:\/([^/]+))?(?:\/(restore))?$/.exec(path);
+    let m = /^\/api\/class\/([^/]+)(?:\/(publish|events|rotate|push|leave))?(?:\/([^/]+))?(?:\/(restore))?$/.exec(path);
     if (m) {
       const [, id, part, uidRaw, restore] = m;
       const cls = await loadClass(env, id);
       if (!cls) return json({ error: 'No such class. Check the link, or create a new class.' }, 404);
+      if (part === 'leave' && !uidRaw && request.method === 'POST') {
+        const sub = decodeURIComponent((request.headers.get('cookie') || '').match(new RegExp(`nd_member_${id}=([^;]+)`))?.[1] || '');
+        if (!sub || !cls.members?.[sub]) return json({ error: 'This phone is not joined to the class.' }, 404);
+        await removeMember(env, cls, sub);
+        await saveClass(env, id, cls);
+        const gone = `nd_member_${id}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`;
+        if (/application\/json/.test(request.headers.get('accept') || '')) return json({ ok: true }, 200, { 'set-cookie': gone });
+        return new Response(null, { status: 303, headers: { location: `${url.origin}/c/${id}?left=1`, 'set-cookie': gone } }); // the page's Leave form
+      }
       if (part === 'push' && !uidRaw) {
         if (request.method !== 'POST' && request.method !== 'DELETE') return json({ error: 'Not found' }, 404);
         if (!pushConfigured(env)) return json({ error: 'Notifications are not set up on this server.' }, 503);
@@ -145,7 +183,7 @@ export async function handle(request, env, { newId } = {}) {
       // CR console: everything published, the clash report, what changed, the pilot numbers (Bearer only).
       if (part === 'events' && !uidRaw && request.method === 'GET') {
         const all = Object.values(cls.events).map((e) => ({ ...e, id: e.uid })).sort((a, b) => `${a.date}${a.start || ''}`.localeCompare(`${b.date}${b.start || ''}`));
-        return json({ id, name: cls.name, updatedAt: cls.updatedAt, events: all, clashes: clashReport(cls, today), changes: publicChanges(cls, 40), stats: stats(cls), today, ...urls(url.origin, id) });
+        return json({ id, name: cls.name, updatedAt: cls.updatedAt, events: all, clashes: clashReport(cls, today), changes: publicChanges(cls, 40), stats: stats(cls), members: memberSummary(cls), subscribers: Object.keys(cls.subs || {}).length, today, ...urls(url.origin, id) });
       }
 
       if (!part && uidRaw) return json({ error: 'Not found' }, 404);
@@ -206,10 +244,12 @@ export async function handle(request, env, { newId } = {}) {
       if (kind === '.json') return json({ id, name: cls.name, updatedAt: cls.updatedAt, events, changes: publicChanges(cls), clashes: clashReport(cls, today), today, now: new Date().toISOString(), remind: dueReminders(cls) }, 200, cache);
       // The page a student reopens after the CR changed something: at most a minute old (the feeds keep 5 minutes; the
       // app revalidates them every time, and calendars poll on their own schedule).
-      return text(subscribePage({ cls, id, origin: url.origin, appUrl: env.APP_URL, today, clashes: clashReport(cls, today), changes: publicChanges(cls) }), 200, 'text/html; charset=utf-8', { ...cache, 'cache-control': 'public, max-age=60', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
+      const sub = decodeURIComponent((request.headers.get('cookie') || '').match(new RegExp(`nd_member_${id}=([^;]+)`))?.[1] || '');
+      const me = sub && cls.members?.[sub] ? { email: cls.members[sub].email, revoked: cls.members[sub].revoked } : null;
+      return text(subscribePage({ cls, id, origin: url.origin, appUrl: env.APP_URL, today, clashes: clashReport(cls, today), changes: publicChanges(cls), google: googleConfigured(env), me, joined: url.searchParams.get('joined'), written: url.searchParams.get('written') }), 200, 'text/html; charset=utf-8', { ...cache, 'cache-control': 'private, max-age=60', vary: 'cookie', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
     }
 
-    if (path === '/' || path === '/health') return json({ ok: true, service: 'notice-decoder-feed', ai: Boolean(env.ANTHROPIC_API_KEY), push: pushConfigured(env) ? env.VAPID_PUBLIC : null, maxEvents: MAX_EVENTS });
+    if (path === '/' || path === '/health') return json({ ok: true, service: 'notice-decoder-feed', ai: Boolean(env.ANTHROPIC_API_KEY), push: pushConfigured(env) ? env.VAPID_PUBLIC : null, google: googleConfigured(env), maxEvents: MAX_EVENTS });
     return json({ error: 'Not found' }, 404);
   } catch (err) {
     const msg = String(err && err.message || err);
@@ -261,7 +301,8 @@ export class ClassRoom {
         this.ctx.waitUntil((async () => {
           if (!silent) {
             await pushAll(this.env, cls);
-            await this.store().put(`class:${this.id}`, JSON.stringify(cls)); // dead subscriptions dropped
+            if (googleConfigured(this.env)) queueAll(cls); // their Google Calendars are written by the alarm, a few members at a time
+            await this.store().put(`class:${this.id}`, JSON.stringify(cls)); // dead subscriptions dropped, queue saved
           }
           await this.arm(cls);
         })());
@@ -270,7 +311,7 @@ export class ClassRoom {
   }
 
   async arm(cls) {
-    const next = nextReminder(cls);
+    const next = (cls.syncQueue || []).length ? Date.now() + 250 : nextReminder(cls);
     const cur = await this.ctx.storage.getAlarm();
     if (next && (!cur || Math.abs(cur - next) > 1000)) await this.ctx.storage.setAlarm(next);
     if (!next && cur) await this.ctx.storage.deleteAlarm();
@@ -292,10 +333,10 @@ export class ClassRoom {
       const raw = this.id && await this.ctx.storage.get(`class:${this.id}`);
       if (!raw || raw === TOMBSTONE) { await this.ctx.storage.deleteAlarm(); return; }
       const cls = upgrade(JSON.parse(raw));
-      if (dueReminders(cls).length) {
-        await pushAll(this.env, cls, { urgency: 'high' });
-        await this.ctx.storage.put(`class:${this.id}`, JSON.stringify(cls));
-      }
+      let dirty = false;
+      if ((cls.syncQueue || []).length && googleConfigured(this.env)) { await drainQueue(this.env, cls); dirty = true; }
+      if (dueReminders(cls).length) { await pushAll(this.env, cls, { urgency: 'high' }); dirty = true; }
+      if (dirty) await this.ctx.storage.put(`class:${this.id}`, JSON.stringify(cls));
       await this.arm(cls);
     });
   }
@@ -316,6 +357,10 @@ export async function route(request, env) {
   }
   const m = request.method !== 'OPTIONS' && CLASS_PATH.exec(path);
   if (m) return room(env, m[1]).fetch(request);
+  if (path === '/oauth/callback') {
+    const st = await readState(env, url.searchParams.get('state'));
+    if (st && validId(st.c)) return room(env, st.c).fetch(request);
+  }
   return handle(request, env); // the AI check, /health, CORS preflights, 404s
 }
 
