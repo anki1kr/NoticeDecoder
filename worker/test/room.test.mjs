@@ -9,7 +9,10 @@ function fakeCtx() {
   let chain = Promise.resolve();
   return {
     map,
-    storage: { get: async (k) => { await tick(); return map.get(k); }, put: async (k, v) => { await tick(); map.set(k, v); }, delete: async (k) => { map.delete(k); } },
+    alarm: null, pending: [],
+    storage: { get: async (k) => { await tick(); return map.get(k); }, put: async (k, v) => { await tick(); map.set(k, v); }, delete: async (k) => { map.delete(k); },
+      getAlarm: async function () { return this.alarmAt ?? null; }, setAlarm: async function (t) { this.alarmAt = t; }, deleteAlarm: async function () { this.alarmAt = null; } },
+    waitUntil(p) { this.pending.push(p.catch((e) => console.log('waitUntil failed', e))); },
     blockConcurrencyWhile(fn) { const run = chain.then(fn); chain = run.catch(() => {}); return run; },
   };
 }

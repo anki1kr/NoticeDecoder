@@ -17,6 +17,7 @@ const GENERIC_TITLE = /^(?:(?:extra|remedial|special|doubt|guest)\s+)?(?:event|e
 
 export const istToday = (now = Date.now()) => new Date(now + 330 * 60000).toISOString().slice(0, 10);
 const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+const addDaysIso = (d, n) => new Date(Date.parse(d) + n * 86400000).toISOString().slice(0, 10);
 const keyOf = (title) => slug(String(title || '').trim() || 'Event');
 const when = (e) => `${e.date}|${e.start || ''}|${e.end || ''}`;
 const compactDate = (d) => d.replace(/-/g, '');
@@ -67,7 +68,9 @@ function freshUid(cls, key, date, claimed) {
 
 // The plan for one publish: per incoming event, what happens to the class calendar. Nothing is written here.
 // intents[i]: 'new' (add it, whatever exists) or 'replace:<uid>' (it is that published event, moved or changed).
-export function plan(cls, incoming, intents = {}) {
+// intents[i] may also be 'keep': publish an event whose date has already passed (an old notice pasted by mistake is
+// the usual case, so by default a past date is shown as PAST and left out).
+export function plan(cls, incoming, intents = {}, today = istToday()) {
   const claimed = new Set();
   const out = [];
   const entries = calendarEntries(incoming.map((e, i) => ({ ...e, id: `in${i}` })));
@@ -77,6 +80,12 @@ export function plan(cls, incoming, intents = {}) {
     const all = Object.values(cls.events).filter((x) => x.key === key && !claimed.has(x.uid));
     const intent = typeof intents[i] === 'string' ? intents[i] : 'auto';
     const item = { i, title: ev.title, date: ev.date, start: ev.start || null, end: ev.end || null, venue: ev.venue || null, key, prev: null, alt: null };
+    const lastDay = ev.repeat > 1 ? addDaysIso(ev.date, ev.every ? ev.repeat * 7 : ev.repeat - 1) : ev.date;
+    if (lastDay < today && intent !== 'keep') {
+      Object.assign(item, { uid: null, action: 'past', alt: { action: 'add', intent: 'keep' }, entryUid: entry.uid });
+      out.push(item);
+      return;
+    }
     const target = (uid, action) => {
       const p = cls.events[uid];
       Object.assign(item, { uid, action, prev: { date: p.date, start: p.start || null, end: p.end || null, venue: p.venue || null, cancelled: Boolean(p.cancelled) } });
@@ -121,6 +130,7 @@ export function apply(cls, incoming, items) {
   const counts = { added: 0, updated: 0, moved: 0, restored: 0, unchanged: 0 };
   const now = new Date().toISOString();
   for (const item of items) {
+    if (item.action === 'past') { counts.past = (counts.past || 0) + 1; continue; }
     const ev = incoming[item.i];
     const before = cls.events[item.uid];
     const { moved, ...fields } = ev;

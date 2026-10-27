@@ -17,6 +17,7 @@ import { toICS } from '../../app/engine/ics.js';
 import { MAX_EVENTS, cleanEvent, upgrade, plan, apply, edit, setCancelled, liveEvents, clashReport, stats, publicChanges, istToday } from './feed.js';
 import { subscribePage } from './page.js';
 import { refine } from './ai.js';
+import { addSubscription, removeSubscription, pushAll, pushConfigured, nextReminder, dueReminders } from './push.js';
 
 const MAX_BODY = 128 * 1024;
 const MAX_INCOMING = 100;
@@ -103,13 +104,24 @@ export async function handle(request, env, { newId } = {}) {
       return json({ id, secret, name, ...urls(url.origin, id) }, 201);
     }
 
-    let m = /^\/api\/class\/([^/]+)(?:\/(publish|events|rotate))?(?:\/([^/]+))?(?:\/(restore))?$/.exec(path);
+    let m = /^\/api\/class\/([^/]+)(?:\/(publish|events|rotate|push))?(?:\/([^/]+))?(?:\/(restore))?$/.exec(path);
     if (m) {
       const [, id, part, uidRaw, restore] = m;
       const cls = await loadClass(env, id);
       if (!cls) return json({ error: 'No such class. Check the link, or create a new class.' }, 404);
+      if (part === 'push' && !uidRaw) {
+        if (request.method !== 'POST' && request.method !== 'DELETE') return json({ error: 'Not found' }, 404);
+        if (!pushConfigured(env)) return json({ error: 'Notifications are not set up on this server.' }, 503);
+        const body = await readJson(request);
+        const endpoint = body.subscription?.endpoint || body.endpoint;
+        if (request.method === 'DELETE') { removeSubscription(cls, endpoint); await saveClass(env, id, cls); return json({ ok: true }); }
+        if (!addSubscription(cls, { endpoint })) return json({ error: 'That does not look like a push subscription, or the class is full.' }, 400);
+        await saveClass(env, id, cls);
+        if (env.AFTER_CHANGE) env.AFTER_CHANGE(cls, { silent: true }); // arm the reminder alarm for this phone too
+        return json({ ok: true, subscribers: Object.keys(cls.subs).length, nextReminder: nextReminder(cls) });
+      }
       if (!(await authed(request, cls))) return json({ error: 'Wrong or missing class key. Only the class representative can change this class.' }, 401);
-      const done = async (data, status = 200) => { await saveClass(env, id, cls); return json(data, status); };
+      const done = async (data, status = 200, { changed = true } = {}) => { await saveClass(env, id, cls); if (changed && env.AFTER_CHANGE) env.AFTER_CHANGE(cls); return json(data, status); };
 
       // Publish: plan first; ?dry=1 returns only the plan, so the CR sees what will change before the class does.
       if (part === 'publish' && !uidRaw && request.method === 'POST') {
@@ -119,7 +131,7 @@ export async function handle(request, env, { newId } = {}) {
         if (!incoming.length) return json({ error: 'No events with a title and a real date to publish.' }, 400);
         const intents = body.intents && typeof body.intents === 'object' ? body.intents : {};
         if (body.replace === true) cls.events = {};
-        const items = plan(cls, incoming, intents);
+        const items = plan(cls, incoming, intents, today);
         const skipped = raw.length - incoming.length;
         if (url.searchParams.get('dry') === '1') return json({ id, plan: items, skipped });
         const counts = apply(cls, incoming, items);
@@ -127,7 +139,7 @@ export async function handle(request, env, { newId } = {}) {
         const clashes = clashReport(cls, today);
         // Every clash pair is counted once, the first time a publish shows it: "clashes the class heard about before the date".
         cls.stats.clashSeen = [...new Set([...cls.stats.clashSeen, ...clashes.map((c) => `${c.a}|${c.b}|${c.date}`)])].slice(-500);
-        return done({ id, plan: items, skipped, ...counts, count: liveEvents(cls).length, clashes, ...urls(url.origin, id) });
+        return done({ id, plan: items, skipped, ...counts, count: liveEvents(cls).length, clashes, ...urls(url.origin, id) }, 200, { changed: items.some((x) => !['same', 'past'].includes(x.action)) });
       }
 
       // CR console: everything published, the clash report, what changed, the pilot numbers (Bearer only).
@@ -191,13 +203,13 @@ export async function handle(request, env, { newId } = {}) {
           .replace('X-WR-TIMEZONE:', 'X-WR-CALDESC:Class notices published with Notice Decoder\r\nREFRESH-INTERVAL;VALUE=DURATION:PT1H\r\nX-PUBLISHED-TTL:PT1H\r\nX-WR-TIMEZONE:');
         return text(ics, 200, 'text/calendar; charset=utf-8', { ...cache, 'content-disposition': `inline; filename="${id}.ics"` });
       }
-      if (kind === '.json') return json({ id, name: cls.name, updatedAt: cls.updatedAt, events, changes: publicChanges(cls), clashes: clashReport(cls, today), today }, 200, cache);
+      if (kind === '.json') return json({ id, name: cls.name, updatedAt: cls.updatedAt, events, changes: publicChanges(cls), clashes: clashReport(cls, today), today, now: new Date().toISOString(), remind: dueReminders(cls) }, 200, cache);
       // The page a student reopens after the CR changed something: at most a minute old (the feeds keep 5 minutes; the
       // app revalidates them every time, and calendars poll on their own schedule).
       return text(subscribePage({ cls, id, origin: url.origin, appUrl: env.APP_URL, today, clashes: clashReport(cls, today), changes: publicChanges(cls) }), 200, 'text/html; charset=utf-8', { ...cache, 'cache-control': 'public, max-age=60', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
     }
 
-    if (path === '/' || path === '/health') return json({ ok: true, service: 'notice-decoder-feed', ai: Boolean(env.ANTHROPIC_API_KEY), maxEvents: MAX_EVENTS });
+    if (path === '/' || path === '/health') return json({ ok: true, service: 'notice-decoder-feed', ai: Boolean(env.ANTHROPIC_API_KEY), push: pushConfigured(env) ? env.VAPID_PUBLIC : null, maxEvents: MAX_EVENTS });
     return json({ error: 'Not found' }, 404);
   } catch (err) {
     const msg = String(err && err.message || err);
@@ -240,10 +252,52 @@ export class ClassRoom {
     };
   }
 
+  roomEnv() {
+    return {
+      ...this.env,
+      CLASSES: this.store(),
+      // After a publish / edit / cancel: wake every subscribed phone now, and set the alarm for the next reminder.
+      AFTER_CHANGE: (cls, { silent = false } = {}) => {
+        this.ctx.waitUntil((async () => {
+          if (!silent) {
+            await pushAll(this.env, cls);
+            await this.store().put(`class:${this.id}`, JSON.stringify(cls)); // dead subscriptions dropped
+          }
+          await this.arm(cls);
+        })());
+      },
+    };
+  }
+
+  async arm(cls) {
+    const next = nextReminder(cls);
+    const cur = await this.ctx.storage.getAlarm();
+    if (next && (!cur || Math.abs(cur - next) > 1000)) await this.ctx.storage.setAlarm(next);
+    if (!next && cur) await this.ctx.storage.deleteAlarm();
+  }
+
   async fetch(request) {
-    const env = { ...this.env, CLASSES: this.store() };
+    const env = this.roomEnv();
     const newId = request.headers.get('x-nd-new-id') || undefined;
+    if (!this.id) {
+      this.id = (await this.ctx.storage.get('__id')) || new URL(request.url).pathname.match(/^\/(?:api\/class|c)\/([a-z0-9]{6,12})/)?.[1] || newId;
+      if (this.id) await this.ctx.storage.put('__id', this.id);
+    }
     return this.ctx.blockConcurrencyWhile(() => handle(request, env, { newId }));
+  }
+
+  // A reminder is due: push every subscribed phone (the service worker reads /c/:id.json `remind`), then re-arm.
+  async alarm() {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      const raw = this.id && await this.ctx.storage.get(`class:${this.id}`);
+      if (!raw || raw === TOMBSTONE) { await this.ctx.storage.deleteAlarm(); return; }
+      const cls = upgrade(JSON.parse(raw));
+      if (dueReminders(cls).length) {
+        await pushAll(this.env, cls, { urgency: 'high' });
+        await this.ctx.storage.put(`class:${this.id}`, JSON.stringify(cls));
+      }
+      await this.arm(cls);
+    });
   }
 }
 

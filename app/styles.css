@@ -365,6 +365,10 @@ input[type="number"] { -moz-appearance: textfield; }
 .plan-add .plan-tag { border-color: var(--green); color: var(--green); }
 .plan-move .plan-tag, .plan-update .plan-tag { border-color: var(--amber); color: var(--amber); }
 .plan-restore .plan-tag { border-color: var(--accent); color: var(--accent); }
+.plan-past { color: var(--muted); }
+.plan-past .plan-tag { border-color: var(--muted); color: var(--muted); }
+#push-row { align-items: center; }
+#push-note { margin: 0; }
 .plan-same { color: var(--muted); }
 .changes li { margin-bottom: 6px; }
 .muted { color: var(--muted); }

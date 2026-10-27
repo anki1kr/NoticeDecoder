@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Class feed + AI check for Notice Decoder (Cloudflare Worker). Deploy: npx wrangler deploy",
   "scripts": {
-    "test": "node test/feed.test.mjs && node test/room.test.mjs && node test/ai.test.mjs",
+    "test": "node test/feed.test.mjs && node test/room.test.mjs && node test/push.test.mjs && node test/ai.test.mjs",
     "deploy": "npx wrangler deploy"
   },
   "dependencies": {

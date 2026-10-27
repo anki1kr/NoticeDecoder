@@ -53,13 +53,25 @@ const env = {
   ...(fakeAi ? { ANTHROPIC_API_KEY: 'sk-dev-fake', AI_FETCH: fakeClaude } : {}),
   ...(realAi ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, AI_FETCH: async (url, init) => { aiCalls++; return fetch(url, init); } } : {}),
 };
+// Web Push with a throwaway VAPID pair; pushes to a fake endpoint are recorded (GET /__dev/pushes), real ones go out.
+const pushLog = [];
+{
+  const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const b64 = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  env.VAPID_PUBLIC = b64(await crypto.subtle.exportKey('raw', k.publicKey));
+  env.VAPID_PRIVATE_JWK = JSON.stringify(await crypto.subtle.exportKey('jwk', k.privateKey));
+  env.PUSH_FETCH = async (url, init) => { pushLog.push({ url, at: Date.now(), urgency: init.headers.Urgency }); return /fake-push/.test(url) ? new Response(null, { status: 201 }) : fetch(url, init); };
+}
 // One in-memory "Durable Object" per class, as in production: requests to a class run one at a time.
 const rooms = new Map();
 function memoryCtx() {
   const map = new Map();
   let chain = Promise.resolve();
-  return { storage: { get: async (k) => map.get(k), put: async (k, v) => { map.set(k, v); }, delete: async (k) => { map.delete(k); } },
+  const ctx = { alarmAt: null,
+    storage: { get: async (k) => map.get(k), put: async (k, v) => { map.set(k, v); }, delete: async (k) => { map.delete(k); }, getAlarm: async () => ctx.alarmAt, setAlarm: async (t) => { ctx.alarmAt = t; }, deleteAlarm: async () => { ctx.alarmAt = null; } },
+    waitUntil(p) { p.catch((e) => console.error('after-change failed', e)); },
     blockConcurrencyWhile(fn) { const run = chain.then(fn); chain = run.catch(() => {}); return run; } };
+  return ctx;
 }
 env.ROOMS = { idFromName: (n) => n, get: (id) => { if (!rooms.has(id)) rooms.set(id, new ClassRoom(memoryCtx(), env)); return rooms.get(id); } };
 
@@ -86,8 +98,9 @@ if (appPort) {
 
 http.createServer(async (req, res) => {
   try {
+    if (req.url === '/__dev/pushes') { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(pushLog)); return; }
     if (req.url === '/__dev/ai-calls') { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); res.end(JSON.stringify({ calls: aiCalls })); return; }
-    if (req.url === '/__dev/reset' && req.method === 'POST') { store.clear(); rooms.clear(); aiCalls = 0; res.writeHead(204, { 'access-control-allow-origin': '*' }); res.end(); return; }
+    if (req.url === '/__dev/reset' && req.method === 'POST') { store.clear(); rooms.clear(); aiCalls = 0; pushLog.length = 0; res.writeHead(204, { 'access-control-allow-origin': '*' }); res.end(); return; }
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !['host', 'connection', 'content-length'].includes(k)));

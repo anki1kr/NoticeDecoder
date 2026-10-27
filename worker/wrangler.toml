@@ -15,6 +15,9 @@ APP_URL = "https://noticedecoder.pages.dev/app/"
 AI_ORIGINS = "https://noticedecoder.pages.dev,https://anki1kr.me,http://127.0.0.1:8771"
 # Hard ceiling on paid AI calls per day (IST). Well under $0.001 each with Haiku 5.5; 0 switches the AI off.
 AI_DAILY_CAP = "300"
+# Web Push (VAPID). The private half is the secret VAPID_PRIVATE_JWK (node vapid-keygen.mjs | npx wrangler secret put VAPID_PRIVATE_JWK).
+VAPID_PUBLIC = "BJjYSp7cWtY23hqz7z79kwV-h6wcANkdeTuDLanFqNbp3emOI5x_r0EinUnqbFqaUFGSliVGBR8G2pa7gHtVDXE"
+VAPID_SUBJECT = "mailto:ankit25679@gmail.com"
 
 [[kv_namespaces]]
 binding = "CLASSES"

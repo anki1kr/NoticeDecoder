@@ -383,6 +383,69 @@ let classId, keyLink;
   await s.close();
 }
 
+// ---------------------------------------------------------------- 8. notifications (push) + past dates
+{
+  // Chrome's push service is not reachable from a test: PushManager is stubbed with a fake endpoint the dev feed accepts.
+  const { context, page } = await newPage({ ai: false, contextOptions: { permissions: ['notifications'] } });
+  await page.evaluate(() => localStorage.removeItem('nd-push'));
+  await context.addInitScript(() => {
+    const fake = { endpoint: `https://fake-push.test/sub/${Math.random().toString(36).slice(2)}`, toJSON() { return { endpoint: this.endpoint, keys: { p256dh: 'x', auth: 'y' } }; }, async unsubscribe() { window.__unsubscribed = true; return true; } };
+    PushManager.prototype.subscribe = async () => { window.__subscribedWith = fake; return fake; };
+    PushManager.prototype.getSubscription = async () => window.__subscribedWith || null;
+  });
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  page.on('dialog', (d) => (d.type() === 'prompt' ? d.accept('Push class') : d.accept()));
+  await page.getByRole('button', { name: 'Exam day clash (PDF sample)' }).click();
+  await page.locator('#class-publish-btn').click();
+  await page.waitForSelector('#class-preview:not([hidden])', { timeout: 15000 });
+  await page.locator('#class-confirm-btn').click();
+  await waitText(page, '#class-result', /Published/);
+  const pc = await page.evaluate(() => JSON.parse(localStorage.getItem('nd-class')));
+  // a student follows the class and turns notifications on
+  const st = await context.newPage();
+  st.on('pageerror', (e) => errors.push(`pageerror: ${e}`));
+  await st.goto(`${BASE}#c=${pc.id}`, { waitUntil: 'networkidle' });
+  await st.waitForSelector('#event-list .ev', { timeout: 10000 });
+  await st.waitForFunction(() => !document.querySelector('#push-row').hidden, null, { timeout: 10000 }).catch(() => {});
+  ok(await st.locator('#push-row').isVisible(), 'push: "Notify me" shows for an opened class when the server has a key');
+  await st.locator('#push-btn').click();
+  await waitText(st, '#push-note', /^On:/);
+  ok(/^On:/.test(await status(st, '#push-note')) && /Stop notifications/.test(await st.locator('#push-btn').innerText()), 'push: one tap subscribes this phone', await status(st, '#push-note'));
+  const pushCfg = await st.evaluate(async () => (await (await caches.open('nd-push')).match('./push-class'))?.json());
+  ok(pushCfg && pushCfg.id === pc.id && pushCfg.feed === FEED, 'push: the service worker knows which class and feed', JSON.stringify(pushCfg));
+  // the CR moves the test: the phone is woken
+  const before = (await (await fetch(`${FEED}/__dev/pushes`)).json()).length;
+  await page.locator('#notice-input').fill('Internal Test 2 is postponed to 16 Nov 2026, 10 AM to 11:30 AM, Room 204.');
+  await page.locator('#decode-btn').click();
+  await page.locator('#class-publish-btn').click();
+  await waitText(page, '#class-preview-list', /Moves/i);
+  await page.locator('#class-confirm-btn').click();
+  await waitText(page, '#class-result', /moved/);
+  await page.waitForTimeout(800);
+  const pushes = await (await fetch(`${FEED}/__dev/pushes`)).json();
+  ok(pushes.length === before + 1 && /fake-push\.test/.test(pushes.at(-1).url), 'push: the publish sent exactly one push to the subscribed phone', JSON.stringify(pushes.slice(-2)));
+  // what the phone shows: run the service worker's push handler directly
+  const [sw] = context.serviceWorkers().length ? context.serviceWorkers() : [await context.waitForEvent('serviceworker')];
+  const shown = await sw.evaluate(async () => { await self.__ndOnPush(); const n = await self.registration.getNotifications(); return n.map((x) => ({ title: x.title, body: x.body, tag: x.tag })); });
+  ok(shown.some((n) => /notice changed|changes/.test(n.title) && /Moved: Internal Test 2/.test(n.body) && /16 Nov/.test(n.body)), 'push: the notification says what moved and to when', JSON.stringify(shown));
+  const again = await sw.evaluate(async () => { for (const n of await self.registration.getNotifications()) n.close(); await self.__ndOnPush(); return (await self.registration.getNotifications()).map((x) => x.title); });
+  ok(again.length === 1 && !/changed/.test(again[0]), 'push: the same change is not announced twice', JSON.stringify(again));
+  await st.locator('#push-btn').click();
+  await waitText(st, '#push-btn', /Notify me/);
+  ok(await st.evaluate(() => window.__unsubscribed === true && !localStorage.getItem('nd-push')), 'push: "Stop notifications" unsubscribes');
+  // past dates: an old notice is left out of the class unless the CR insists
+  await page.locator('#notice-input').fill('Guest lecture on 23 Oct 2026 at 3 PM in Seminar Hall.');
+  await page.locator('#decode-btn').click();
+  await page.locator('#class-publish-btn').click();
+  await waitText(page, '#class-preview-list', /Past/i);
+  ok(/^past\b/im.test(await page.locator('#class-preview-list').innerText()) && await page.locator('#class-confirm-btn').isDisabled(), 'past date: shown as PAST, nothing to publish');
+  await page.locator('#class-preview-list').getByRole('button', { name: 'Publish anyway' }).click();
+  await waitText(page, '#class-preview-list', /^new/im);
+  ok(await page.locator('#class-confirm-btn').isEnabled(), 'past date: "Publish anyway" turns it into a normal publish');
+  await st.close();
+  await context.close();
+}
+
 ok(errors.length === 0, 'no console or page errors anywhere', errors.join(' | '));
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();

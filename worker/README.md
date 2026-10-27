@@ -55,6 +55,19 @@ date within 60 days, or an event the notice itself says was postponed (`moved: t
 UIDs, times and reminders come from `app/engine/ics.js::calendarEntries`, the same code the .ics download and the
 Google writer use, so every path agrees. A stored event keeps its UID forever (edits, moves, renames).
 
+## Notifications (Web Push)
+
+`POST /api/class/:id/push {subscription}` stores this phone's push endpoint on the class (no class key: students do it);
+`DELETE` removes it. After every publish, edit, cancel or restore the Durable Object pushes every endpoint
+(`pushAll`), drops the ones that answer 404/410, and arms its alarm for the next reminder (`nextReminder`: a test 1 day
+before, a deadline 3 h before, a lecture 30 min before, an all-day item at 6 PM the day before, all IST). The alarm
+pushes again with `Urgency: high` and re-arms. Pushes carry no payload: only a VAPID JWT (ES256, WebCrypto) for the
+push service's origin. The app's service worker then fetches `/c/:id.json`, whose `changes` (timestamps) and `remind`
+(UIDs whose reminder fell in the last 40 minutes) tell it what to say. Keys: `VAPID_PUBLIC` in wrangler.toml (also in
+`/health` as `push`), the private half as the secret `VAPID_PRIVATE_JWK` (`node vapid-keygen.mjs | npx wrangler secret
+put VAPID_PRIVATE_JWK`). Limits: 400 phones per class; a phone that fails 5 pushes in a row is dropped. iOS needs the
+app installed to the home screen (Apple's rule for web push); Android Chrome works from the browser.
+
 ## AI check
 
 One call to `claude-haiku-5-5` per notice that needs it (the app decides: weak names, nothing found, or text from a

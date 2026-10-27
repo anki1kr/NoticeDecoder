@@ -30,6 +30,7 @@ const SHELL = [
   './engine/holidays.js',
 ];
 const SHARE_CACHE = 'nd-share';
+const PUSH_CACHE = 'nd-push';
 const LIB_CACHE = 'nd-libs-v1';
 const LIB_HOSTS = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com'];
 
@@ -39,7 +40,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== SHARE_CACHE && k !== LIB_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== SHARE_CACHE && k !== LIB_CACHE && k !== PUSH_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
   );
 });
 
@@ -95,4 +96,56 @@ self.addEventListener('fetch', (event) => {
       return hit || fetching;
     }),
   );
+});
+
+// ---------- notifications ----------
+// A push from the class server carries no text (that would need per-phone encryption). It only wakes this worker,
+// which fetches the class and decides: something changed since we last looked -> say what; a reminder is due -> say
+// which event; else a quiet "updated" so the browser never shows its own "site updated in background" notice.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const day = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]}`; };
+const clock = (hm) => { if (!hm) return ''; const [h, m] = hm.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+const when = (e) => `${day(e.date)}${e.start ? `, ${clock(e.start)}` : ''}`;
+
+// Exposed as a function so the browser check can run it without a real push service.
+self.__ndOnPush = async () => {
+  {
+    const cache = await caches.open(PUSH_CACHE);
+    const cfgRes = await cache.match('./push-class');
+    if (!cfgRes) return;
+    const cfg = await cfgRes.json();
+    const open = `./#c=${cfg.id}`;
+    const show = (title, body, tag) => self.registration.showNotification(title, { body, tag, icon: './icon-192.png', badge: './icon-192.png', data: { open }, renotify: true });
+    let data;
+    try { data = await (await fetch(`${cfg.feed}/c/${cfg.id}.json`, { cache: 'no-store' })).json(); } catch { return show(cfg.name, 'A notice was published. Open to see it.', 'nd-fallback'); }
+    const seen = cfg.seen || '1970-01-01';
+    const fresh = (data.changes || []).filter((c) => c.at > seen);
+    const words = { added: 'New', moved: 'Moved', updated: 'Changed', cancelled: 'Cancelled', restored: 'Back on' };
+    if (fresh.length) {
+      const lines = fresh.slice(0, 3).map((c) => `${words[c.kind] || c.kind}: ${c.title}, ${c.kind === 'moved' && c.from ? `${day(c.from.date)} → ` : ''}${when(c)}`);
+      if (fresh.length > 3) lines.push(`and ${fresh.length - 3} more`);
+      await show(`${cfg.name}: ${fresh.length === 1 ? lines[0].split(':')[0].toLowerCase() === 'new' ? 'new notice' : 'notice changed' : `${fresh.length} changes`}`, lines.join('\n'), 'nd-change');
+      await cache.put('./push-class', new Response(JSON.stringify({ ...cfg, seen: data.now || new Date().toISOString() }), { headers: { 'content-type': 'application/json' } }));
+      return;
+    }
+    const due = (data.remind || []).map((uid) => (data.events || []).find((e) => e.uid === uid)).filter(Boolean);
+    if (due.length) {
+      const e = due[0];
+      const lead = e.type === 'test' ? 'Tomorrow' : e.type === 'deadline' ? (e.start ? 'In 3 hours' : 'Tomorrow') : 'In 30 minutes';
+      return show(`${lead}: ${e.title}`, `${when(e)}${e.venue ? ` · ${e.venue}` : ''}${due.length > 1 ? `\n+${due.length - 1} more coming up` : ''}`, `nd-remind-${e.uid}`);
+    }
+    return show(cfg.name, 'Class calendar updated.', 'nd-fallback');
+  }
+};
+self.addEventListener('push', (event) => event.waitUntil(self.__ndOnPush()));
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.open || './', self.registration.scope).href;
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const same = all.find((c) => c.url.startsWith(self.registration.scope));
+    if (same) { await same.focus(); return same.navigate(target); }
+    return self.clients.openWindow(target);
+  })());
 });

@@ -131,6 +131,9 @@ const els = {
   aiToggle: $('#ai-toggle'),
   aiBtn: $('#ai-btn'),
   aiStatus: $('#ai-status'),
+  pushRow: $('#push-row'),
+  pushBtn: $('#push-btn'),
+  pushNote: $('#push-note'),
   install: $('#install-btn'),
   offline: $('#offline-note'),
 };
@@ -148,6 +151,9 @@ const state = {
   seq: 0,           // bumps on every decode: an answer (AI, file) for an older notice is dropped, never applied
   aiBusy: false,
   aiServer: null,   // null = not asked yet, true/false = the class server has an AI key
+  pushKey: null,    // the server's VAPID public key, or null when it cannot send notifications
+  pushBusy: false,
+  pushNote: null,   // the last error from turning notifications on, shown until the next try
   aiUndo: null,     // the events as they were before the AI check, for Undo
   aiNote: null,     // { kind, text } the AI status line
   fileJob: 0,       // bumps on every file: a slow OCR of an older file never overwrites a newer one
@@ -382,9 +388,70 @@ async function askAiServer() {
   if (!feedBase()) return;
   try {
     const res = await timedFetch(`${feedBase()}/health`, {}, 8000);
-    state.aiServer = Boolean((await res.json()).ai);
+    const h = await res.json();
+    state.aiServer = Boolean(h.ai);
+    state.pushKey = typeof h.push === 'string' ? h.push : null;
   } catch { state.aiServer = false; }
   renderAi();
+  renderPush();
+}
+
+// ---------- notifications: the class server wakes this phone when the CR publishes, and before each event ----------
+// The push carries nothing; sw.js fetches the class and decides what to say. One class per phone (the one followed).
+
+const PUSH_KEY = 'nd-push'; // { id, name, endpoint }
+const pushState = () => { try { return JSON.parse(localStorage.getItem(PUSH_KEY) || 'null'); } catch { return null; } };
+const savePush = (v) => { try { if (v) localStorage.setItem(PUSH_KEY, JSON.stringify(v)); else localStorage.removeItem(PUSH_KEY); } catch { /* ignore */ } };
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && location.protocol !== 'file:';
+
+function renderPush() {
+  const cls = state.shared?.classId;
+  const can = pushSupported() && Boolean(state.pushKey) && Boolean(cls);
+  els.pushRow.hidden = !can;
+  if (!can) return;
+  const on = pushState();
+  const here = on && on.id === cls;
+  els.pushBtn.disabled = state.pushBusy || Notification.permission === 'denied';
+  els.pushBtn.textContent = state.pushBusy ? 'Setting up…' : here ? '🔕 Stop notifications' : '🔔 Notify me for this class';
+  els.pushNote.textContent = state.pushNote ? state.pushNote : Notification.permission === 'denied' ? 'Notifications are blocked for this site in your browser settings.'
+    : here ? `On: a notification when ${on.name} publishes or changes something, and a reminder before each event.`
+      : on ? `Currently on for ${on.name}; this switches it to this class.` : 'Works with the screen locked. Nothing else is sent.';
+}
+
+const b64ToBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=')), (c) => c.charCodeAt(0));
+
+async function togglePush() {
+  const cls = state.shared?.classId, name = state.shared?.className;
+  if (!cls || state.pushBusy) return;
+  state.pushBusy = true;
+  state.pushNote = null;
+  renderPush();
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const on = pushState();
+    if (on && on.id === cls) {
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) { await feedCall('DELETE', `/api/class/${cls}/push`, { body: { endpoint: sub.endpoint } }).catch(() => {}); await sub.unsubscribe(); }
+      savePush(null);
+      await (await caches.open('nd-push')).delete('./push-class').catch(() => {});
+      return;
+    }
+    if (Notification.permission !== 'granted' && (await Notification.requestPermission()) !== 'granted') return;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(state.pushKey) });
+    if (on && on.id !== cls) await feedCall('DELETE', `/api/class/${on.id}/push`, { body: { endpoint: sub.endpoint } }).catch(() => {});
+    await feedCall('POST', `/api/class/${cls}/push`, { body: { subscription: sub.toJSON() } });
+    savePush({ id: cls, name, endpoint: sub.endpoint });
+    // what the service worker needs when a push arrives: which class, where its feed is
+    const cache = await caches.open('nd-push');
+    await cache.put('./push-class', new Response(JSON.stringify({ id: cls, name, feed: feedBase(), seen: new Date().toISOString() }), { headers: { 'content-type': 'application/json' } }));
+    if (reg.showNotification) reg.showNotification(`${name}: notifications on`, { body: 'You will hear when a notice is published or changed, and before each event.', icon: './icon-192.png', tag: 'nd-on' }).catch(() => {});
+  } catch (err) {
+    state.pushNote = /denied|permission/i.test(String(err?.message)) ? 'Notifications were not allowed.' : friendlyNet(err);
+  } finally {
+    state.pushBusy = false;
+    renderPush();
+  }
 }
 
 // ---------- network helpers ----------
@@ -453,6 +520,7 @@ function renderAll() {
   renderExport();
   renderAi();
   renderClass();
+  renderPush();
 }
 const CHANGE_WORDS = { added: 'New', moved: 'Moved', updated: 'Updated', cancelled: 'Cancelled', restored: 'Back on' };
 
@@ -1292,7 +1360,7 @@ async function refreshPreview() {
   renderPreview();
 }
 
-const PLAN_WORDS = { add: 'New', update: 'Changes', move: 'Moves', same: 'No change', restore: 'Back on' };
+const PLAN_WORDS = { add: 'New', update: 'Changes', move: 'Moves', same: 'No change', restore: 'Back on', past: 'Past' };
 const whenShort = (date, start) => `${shortDate(date)}${start ? `, ${fmt12(start)}` : ''}`;
 
 function renderPreview() {
@@ -1301,10 +1369,10 @@ function renderPreview() {
   if (!p?.plan) return;
   const c = myClass();
   const counts = p.plan.reduce((m, x) => ({ ...m, [x.action]: (m[x.action] || 0) + 1 }), {});
-  const real = p.plan.filter((x) => x.action !== 'same').length;
+  const real = p.plan.filter((x) => x.action !== 'same' && x.action !== 'past').length;
   els.classPreviewHint.textContent = real
-    ? `This is what ${c?.name || 'the class'} will see. ${[counts.add && `${counts.add} new`, counts.move && `${counts.move} moved`, counts.update && `${counts.update} changed`, counts.restore && `${counts.restore} back on`].filter(Boolean).join(', ')}.${p.skipped ? ` ${p.skipped} left out (no real date).` : ''}`
-    : 'Nothing new: the class calendar already has all of these.';
+    ? `This is what ${c?.name || 'the class'} will see. ${[counts.add && `${counts.add} new`, counts.move && `${counts.move} moved`, counts.update && `${counts.update} changed`, counts.restore && `${counts.restore} back on`].filter(Boolean).join(', ')}.${counts.past ? ` ${counts.past} already over (left out).` : ''}${p.skipped ? ` ${p.skipped} left out (no real date).` : ''}`
+    : counts.past && !p.plan.some((x) => x.action === 'same') ? 'Every date here has already passed. If this is still wanted, say so next to the event.' : 'Nothing new: the class calendar already has all of these.';
   els.classPreviewList.replaceChildren(...p.plan.map((x) => {
     const ev = p.events[x.i];
     const detail = x.action === 'move' && x.prev ? `${whenShort(x.prev.date, x.prev.start)} → ${whenShort(x.date, x.start)}`
@@ -1313,7 +1381,7 @@ function renderPreview() {
     const flip = x.alt && el('button', {
       type: 'button', class: 'link',
       onclick: async () => { if (state.classBusy) return; p.intents = { ...p.intents, [x.i]: x.alt.intent }; setClassBusy(true); try { await refreshPreview(); } catch (err) { classSay(err.message, 'error'); } finally { setClassBusy(false); } },
-    }, x.alt.action === 'move' ? `It is the ${shortDate(x.alt.date)} one, moved` : 'No, it is a different one');
+    }, x.action === 'past' ? 'Publish anyway' : x.alt.action === 'move' ? `It is the ${shortDate(x.alt.date)} one, moved` : 'No, it is a different one');
     return el('li', { class: `plan plan-${x.action}` }, el('span', { class: 'plan-tag' }, PLAN_WORDS[x.action] || x.action), ' ', el('strong', {}, ev.title), ` · ${detail}`, flip ? ' ' : null, flip);
   }));
   els.classConfirm.disabled = !real || state.classBusy;
@@ -1330,7 +1398,7 @@ async function confirmPublish() {
     const r = await feedCall('POST', `/api/class/${c.id}/publish`, { body: { events: p.events, intents: p.intents }, token: c.secret });
     state.pending = null;
     els.classPreview.hidden = true;
-    const parts = [r.added && `${r.added} new`, r.moved && `${r.moved} moved`, r.updated && `${r.updated} updated`, r.restored && `${r.restored} back on`].filter(Boolean);
+    const parts = [r.added && `${r.added} new`, r.moved && `${r.moved} moved`, r.updated && `${r.updated} updated`, r.restored && `${r.restored} back on`, r.past && `${r.past} already over, left out`].filter(Boolean);
     const clashes = r.clashes.length
       ? ` ${r.clashes.length} clash${r.clashes.length > 1 ? 'es' : ''} coming up: ${r.clashes.slice(0, 3).map((x) => `${x.a} × ${x.b} (${shortDate(x.date)})`).join('; ')}.`
       : ' No clashes coming up.';
@@ -1565,7 +1633,7 @@ async function openClass(idOrLink) {
     state.exportNote = null;
     state.aiUndo = null;
     state.aiNote = null;
-    state.shared = { from: `the class representative of ${data.name}`, on: safeDate((data.updatedAt || '').slice(0, 10)), changes: data.changes || [] };
+    state.shared = { from: `the class representative of ${data.name}`, on: safeDate((data.updatedAt || '').slice(0, 10)), changes: data.changes || [], classId: id, className: data.name };
     state.lastRemoved = null;
     const mine = myClass();
     if (!mine || mine.id !== id) saveFollow({ id, name: data.name, seen: data.updatedAt });
@@ -1860,6 +1928,7 @@ function init() {
   els.classJoin.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openClass(els.classJoin.value); } });
   els.followOpen.addEventListener('click', () => { const f = followed(); if (f) openClass(f.id); });
   els.aiBtn.addEventListener('click', () => runAi());
+  els.pushBtn.addEventListener('click', togglePush);
   els.aiToggle.checked = aiOn();
   els.aiToggle.addEventListener('change', () => { try { localStorage.setItem(AI_KEY, els.aiToggle.checked ? '1' : '0'); } catch { /* ignore */ } });
   renderClass();

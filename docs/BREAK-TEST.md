@@ -2,7 +2,7 @@
 
 The question: how would a student or a class representative break Notice Decoder, by accident or on purpose? Every
 item below was found by a test (or, where it says "code review", while reading the code for one) and is fixed; the
-tests now run on every change. 19 of the rows are bugs in the app as it was; the AI-focus row is a guard for the new
+tests now run on every change. 21 of the rows are bugs in the app as it was; the AI-focus row is a guard for the new
 AI check.
 
 | What a user does | What used to happen | Now | Test |
@@ -25,6 +25,8 @@ AI check.
 | Uploads a photo on a weak connection (OCR model download fails) | "Preparing the reader…" **forever**, plus an uncaught error; after the network came back, photos kept failing until a reload | Plain message in under a second; the next photo works without a reload | break-check (`OCR_CHECKS=1`) |
 | AI answer arrives while the student is typing in a field | (new feature) would re-render under the cursor | No re-render when nothing changed; the cursor is put back when something did | code review |
 | CR publishes, then edits, cancels or publishes again within a minute (found on the LIVE Worker) | Cloudflare KV served the class as it was before the publish: a read right after a publish showed 0 events, the edit and the cancel said "No such event", and a write in that minute would have saved the old copy back and wiped the publish. Twenty publishes at once kept 1 | Every class is its own Durable Object: it reads its own writes and runs one request at a time. Live probe 5/5 consistent; twenty at once keep 20; the 17 classes made before the move were carried over on first read | `worker/test/room.test.mjs`, `tools/consistency-probe.mjs` (live) |
+| CR publishes; students wait for the reminder (found by the owner, 27 Oct) | Nothing came: Google refreshes a subscribed calendar in 12-24 h and ignores the feed's reminders; the one-tap Google writer was blocked on the new domain (OAuth origin) | Push notifications and reminders from our own server (Web Push + Durable Object alarms); the OAuth origin is an owner step | `worker/test/push.test.mjs`, break-check |
+| CR pastes an old notice (the owner's test: a webinar 4 days back) | Published as "new"; no reminder can ever fire for it | Shown as PAST in the preview and left out; "Publish anyway" if it is really wanted | push test, break-check |
 | `PATCH /api/class/<id>/anything` with a name | Renamed the class | 404 | worker feed test |
 | Class name sent as an object | Stored as "[object Object]" | 400 | worker feed test |
 
