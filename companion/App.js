@@ -125,8 +125,14 @@ export default function App() {
       {feedConfigured() ? (
         <View style={s.card}>
           <Text style={s.h2}>4. Class calendar</Text>
-          <Text style={s.hint}>Paste the class id from the class representative. New or revised events published for the class land here every 15 minutes.</Text>
-          <TextInput value={settings.classId} onChangeText={async (v) => setS(await setSettings({ classId: v.trim() }))} placeholder="class id, e.g. abcd2345" style={s.input} autoCapitalize="none" />
+          <Text style={s.hint}>Paste the class link (students) or the class key link (class representative: it fills both fields, and then every sure event from your watched group is published to the whole class).</Text>
+          <TextInput value={settings.classId} onChangeText={async (v) => {
+            // A class representative can paste the whole "class key link" from the web app (…#cr=<id>.<secret>):
+            // both fields fill at once, instead of typing a long secret on a phone keyboard.
+            const m = /#cr=([a-z0-9]{6,12})\.([A-Za-z0-9_-]{8,})/.exec(v);
+            const c = /\/c\/([a-z0-9]{6,12})\b/.exec(v) || /#c=([a-z0-9]{6,12})\b/.exec(v);
+            setS(await setSettings(m ? { classId: m[1], classSecret: m[2] } : { classId: c ? c[1] : v.trim() }));
+          }} placeholder="class id, class link, or the CR's class key link" style={s.input} autoCapitalize="none" />
           <TextInput value={settings.classSecret} onChangeText={async (v) => setS(await setSettings({ classSecret: v.trim() }))} placeholder="class secret (class representatives only)" style={s.input} autoCapitalize="none" secureTextEntry />
           <Btn onPress={async () => { try { const r = await pullClass(); setMsg(r.skipped ? 'Set a class id first.' : `${r.name}: ${r.added} new, ${r.updated} updated, ${r.removed} removed.`); } catch (e) { setMsg(String(e.message)); } refresh(); }} text="Pull now" />
         </View>

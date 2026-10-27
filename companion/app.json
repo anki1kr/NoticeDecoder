@@ -54,6 +54,9 @@
     "extra": {
       "appUrl": "https://noticedecoder.pages.dev/app/",
       "feedBase": "https://notice-decoder-feed.ankit25679.workers.dev"
+    },
+    "ios": {
+      "bundleIdentifier": "me.anki1kr.noticedecoder"
     }
   }
 }

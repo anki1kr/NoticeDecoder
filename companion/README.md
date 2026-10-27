@@ -20,8 +20,22 @@ npm run android                     # builds a dev client and installs it on a c
 A real phone is needed to see WhatsApp notifications (an emulator has no WhatsApp). APK for judges:
 `npm run build:apk` (EAS, free tier, `eas login` first) or `npm run prebuild && cd android && ./gradlew assembleRelease`.
 
+**Local APK on Windows, no EAS (done 2026-10-27, 28.5 MB, arm64):** JDK 17+ and the Android command-line tools in
+`%LOCALAPPDATA%\Android\Sdk\cmdline-tools\latest`, `sdkmanager --licenses` accepted (Gradle then fetches platform 36,
+build-tools 35/36, NDK 27.1 and CMake itself), `sdk.dir` in `android/local.properties`, then
+`gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a` (about 20 minutes the first time, 6 after).
+Output: `android/app/build/outputs/apk/release/app-release.apk`, signed with the debug key (fine for sideloading).
+On a slow line the Gradle wrapper's 10 s download timeout fails: raise `networkTimeout` in
+`android/gradle/wrapper/gradle-wrapper.properties` or point `distributionUrl` at a zip fetched with `curl -C -`.
+Two config bugs the first real build found, both fixed here: `expo-share-intent` crashes `expo config` without
+`ios.bundleIdentifier` even for an Android-only build, and the listener library's `allowBackup="false"` clashed with
+Expo's `"true"` in the manifest merge (the plugin now sets false with `tools:replace`; the class key must not go into
+phone backups anyway).
+
 ## First launch on the phone
 
+0. Installed from Drive or Files (not the Play Store), Android 13+ greys out *Notification access* as a "restricted
+   setting". Open Settings > Apps > Notice Decoder > ⋮ (top right) > **Allow restricted settings** first.
 1. Allow **Read notifications**: Android opens *Notification access*; switch Notice Decoder on. Then Calendar and
    Notifications permissions.
 2. Under **Groups to watch**, tick your class group (its name appears after the next WhatsApp message) or type it.
