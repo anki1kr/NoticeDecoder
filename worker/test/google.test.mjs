@@ -14,7 +14,9 @@ async function fakeGoogle(url, init = {}) {
   if (u.hostname === 'oauth2.googleapis.com' && u.pathname === '/token') {
     const p = Object.fromEntries(new URLSearchParams(init.body));
     google.tokenCalls.push(p);
-    if (p.grant_type === 'authorization_code') return p.code === 'good' ? j({ access_token: 'at1', expires_in: 3600, refresh_token: 'rt1', id_token: idToken('sub-1', 'student@gmail.com') }) : p.code === 'norefresh' ? j({ access_token: 'at1', expires_in: 3600, id_token: idToken('sub-2', 'x@y') }) : j({ error: 'invalid_grant' }, 400);
+    const CAL = 'https://www.googleapis.com/auth/calendar.app.created';
+    if (p.grant_type === 'authorization_code' && p.code === 'emailonly') return j({ access_token: 'at9', expires_in: 3600, refresh_token: 'rt9', scope: 'openid email', id_token: idToken('sub-9', 'nobox@gmail.com') });
+    if (p.grant_type === 'authorization_code') return p.code === 'good' ? j({ access_token: 'at1', expires_in: 3600, refresh_token: 'rt1', scope: `openid ${CAL} email`, id_token: idToken('sub-1', 'student@gmail.com') }) : p.code === 'norefresh' ? j({ access_token: 'at1', expires_in: 3600, scope: CAL, id_token: idToken('sub-2', 'x@y') }) : j({ error: 'invalid_grant' }, 400);
     if (p.grant_type === 'refresh_token') return google.refreshOk ? j({ access_token: 'at2', expires_in: 3600 }) : j({ error: 'invalid_grant', error_description: 'Token has been revoked.' }, 400);
   }
   if (u.hostname === 'oauth2.googleapis.com' && u.pathname === '/revoke') { google.apiCalls.push(['REVOKE', u.search]); return new Response(null, { status: 200 }); }
@@ -24,9 +26,10 @@ async function fakeGoogle(url, init = {}) {
   if (!m) return j({ error: { message: 'unknown' } }, 404);
   const [, kind, calId, ev, evId] = m.map((x) => (x ? decodeURIComponent(x) : x));
   if (kind === 'users/me/calendarList') return j({ id: calId, selected: true });
-  if (!calId && init.method === 'POST') { const id = `cal-${google.nextId++}@group.calendar.google.com`; calendars[id] = { events: {} }; return j({ id }); }
+  if (!calId && init.method === 'POST') { const id = `cal-${google.nextId++}@group.calendar.google.com`; calendars[id] = { events: {}, summary: JSON.parse(init.body).summary }; return j({ id }); }
   const cal = calendars[calId];
   if (!cal) return j({ error: { message: 'Not Found' } }, 404);
+  if (!ev && init.method === 'DELETE') { delete calendars[calId]; return new Response(null, { status: 204 }); }
   if (!ev) return j({ id: calId });
   const body = init.body ? JSON.parse(init.body) : null;
   if (evId === 'import' && init.method === 'POST') { const id = `g${google.nextId++}`; cal.events[id] = body; return j({ id, ...body }); }
@@ -95,6 +98,7 @@ await test('callback: code -> refresh token sealed on the class, calendar made a
   assert.notEqual(m.refresh, 'rt1', 'the refresh token is not stored in clear');
   assert.equal(await open(base, m.refresh), 'rt1');
   assert.ok(m.calendarId in calendars);
+  assert.equal(calendars[m.calendarId].summary, 'BCA DS · Notice Decoder', 'one calendar per class, named after it');
   assert.ok(google.apiCalls.some(([meth, p]) => meth === 'PATCH' && /calendarList/.test(p)), 'the new calendar is marked selected');
   const written = Object.values(calendars[m.calendarId].events);
   assert.equal(written.length, 2);
@@ -112,12 +116,17 @@ await test('a used or forged state is refused; a code without refresh token says
   const st2 = new URL(r.headers.get('location')).searchParams.get('state');
   const nr = await call('GET', `/oauth/callback?code=norefresh&state=${encodeURIComponent(st2)}`);
   assert.match(nr.headers.get('location'), /joined=norefresh/);
+  const nobox = await call('GET', `/oauth/callback?code=emailonly&state=${encodeURIComponent(st2)}`);
+  assert.match(nobox.headers.get('location'), /joined=noscope$/, 'calendar box left unticked: refused, not joined');
+  assert.ok(!('sub-9' in stored(c.id).members));
+  assert.match(await (await call('GET', `/c/${c.id}?joined=noscope`)).text(), /tick the box/);
   const den = await call('GET', `/oauth/callback?error=access_denied&state=${encodeURIComponent(st2)}`);
   assert.match(den.headers.get('location'), /joined=no$/);
 });
 
 await test('a later publish writes only what changed into the joined calendar, through the alarm queue', async () => {
   google.apiCalls.length = 0;
+  { const k = stored(c.id); k.members['sub-1'].access = null; rooms.get(c.id).ctx.map.set(`class:${c.id}`, JSON.stringify(k)); } // the hour is up
   await call('POST', `/api/class/${c.id}/publish`, { body: { events: [{ ...future(5, 'Internal Test 2'), start: '14:00', end: '15:30' }, future(9, 'Guest lecture: AI')] }, token: c.secret });
   await settle(c.id);
   assert.deepEqual(stored(c.id).syncQueue, ['sub-1']);
@@ -165,6 +174,46 @@ await test('leave: the member is removed and the token revoked; a stranger canno
   assert.match(r.headers.get('set-cookie'), /Max-Age=0/);
   assert.ok(!('sub-1' in stored(c.id).members));
   assert.ok(google.apiCalls.some(([m]) => m === 'REVOKE'));
+});
+
+await test('a big class: the first sync stops inside the call budget and the alarm finishes it, nothing written twice', async () => {
+  const big = await J(await call('POST', '/api/class', { body: { name: 'Big class' } }));
+  const many = Array.from({ length: 70 }, (_, i) => future(3 + (i % 20), `Lab session ${i + 1}`, `${String(8 + (i % 9)).padStart(2, '0')}:00`));
+  await call('POST', `/api/class/${big.id}/publish`, { body: { events: many }, token: big.secret });
+  await settle(big.id);
+  const n = Object.keys(stored(big.id).events).length;
+  const r = await call('GET', `/oauth/start?class=${big.id}`);
+  const st = new URL(r.headers.get('location')).searchParams.get('state');
+  google.apiCalls.length = 0;
+  const back = await call('GET', `/oauth/callback?code=good&state=${encodeURIComponent(st)}`);
+  const firstRun = google.apiCalls.length;
+  assert.ok(firstRun <= 40, `the callback stayed inside the budget (${firstRun} calls)`);
+  assert.match(back.headers.get('location'), /joined=/);
+  assert.deepEqual(stored(big.id).syncQueue, ['sub-1'], 'the rest is queued');
+  await settle(big.id);
+  for (let i = 0; i < 6 && stored(big.id).syncQueue.length; i++) { const room = rooms.get(big.id); room.ctx.alarmAt = Date.now(); await runAlarms(big.id); }
+  const m = stored(big.id).members['sub-1'];
+  const evs = Object.values(calendars[m.calendarId].events);
+  assert.equal(evs.length, n, `all ${n} events written`);
+  assert.equal(new Set(evs.map((e) => e.iCalUID)).size, n, 'no event written twice');
+  assert.deepEqual(stored(big.id).syncQueue, []);
+  // deleting the class removes the class calendar from the student's account and revokes access
+  google.apiCalls.length = 0;
+  await call('DELETE', `/api/class/${big.id}`, { token: big.secret });
+  assert.ok(!(m.calendarId in calendars), 'class calendar removed');
+  assert.ok(google.apiCalls.some(([x]) => x === 'REVOKE'));
+});
+
+await test('leave removes the class calendar too', async () => {
+  const k = await J(await call('POST', '/api/class', { body: { name: 'Leave test' } }));
+  await call('POST', `/api/class/${k.id}/publish`, { body: { events: [future(4, 'Quiz')] }, token: k.secret });
+  await settle(k.id);
+  const st = new URL((await call('GET', `/oauth/start?class=${k.id}`)).headers.get('location')).searchParams.get('state');
+  await call('GET', `/oauth/callback?code=good&state=${encodeURIComponent(st)}`);
+  const calId = stored(k.id).members['sub-1'].calendarId;
+  assert.ok(calId in calendars);
+  await call('POST', `/api/class/${k.id}/leave`, { headers: { cookie: `nd_member_${k.id}=sub-1` } });
+  assert.ok(!(calId in calendars));
 });
 
 await test('without the Google secrets: no join box, /oauth/start says so', async () => {

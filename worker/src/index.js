@@ -18,7 +18,7 @@ import { MAX_EVENTS, cleanEvent, upgrade, plan, apply, edit, setCancelled, liveE
 import { subscribePage } from './page.js';
 import { refine } from './ai.js';
 import { addSubscription, removeSubscription, pushAll, pushConfigured, nextReminder, dueReminders } from './push.js';
-import { googleConfigured, startUrl, readState, exchangeCode, addMember, removeMember, syncMember, queueAll, drainQueue, memberSummary } from './google.js';
+import { googleConfigured, startUrl, readState, exchangeCode, addMember, removeMember, syncMember, queueAll, queueOne, drainQueue, farewell, memberSummary, BUDGET } from './google.js';
 
 const MAX_BODY = 128 * 1024;
 const MAX_INCOMING = 100;
@@ -107,10 +107,12 @@ export async function handle(request, env, { newId } = {}) {
       const cls = await loadClass(env, st.c);
       if (!cls) return text('No such class.', 404, 'text/plain; charset=utf-8');
       let who;
-      try { who = await exchangeCode(env, { code: url.searchParams.get('code') || '', origin: url.origin }); } catch (err) { console.error('oauth exchange', err.message); return back(err.code === 'no_refresh' ? 'joined=norefresh' : 'joined=no'); }
+      try { who = await exchangeCode(env, { code: url.searchParams.get('code') || '', origin: url.origin }); } catch (err) { console.error('oauth exchange', err.message); return back(err.code === 'no_refresh' ? 'joined=norefresh' : err.code === 'no_scope' ? 'joined=noscope' : 'joined=no'); }
       if (!addMember(cls, who)) return back('joined=full');
       await saveClass(env, st.c, cls);
-      const r = await syncMember(env, cls, who.sub, { all: true }); // the events are there before the page comes back
+      // The events are there before the page comes back (a big class finishes from the alarm a moment later).
+      const r = await syncMember(env, cls, who.sub, { budget: { left: BUDGET - 2 } });
+      if (r.incomplete) queueOne(cls, who.sub);
       await saveClass(env, st.c, cls);
       if (env.AFTER_CHANGE) env.AFTER_CHANGE(cls, { silent: true });
       const cookie = `nd_member_${st.c}=${encodeURIComponent(who.sub)}; Path=/; Max-Age=31536000; Secure; HttpOnly; SameSite=Lax`;
@@ -201,6 +203,9 @@ export async function handle(request, env, { newId } = {}) {
         return done({ ok: true, id, secret, name: cls.name, ...urls(url.origin, id) });
       }
       if (!part && request.method === 'DELETE') {
+        // Joined students: their class calendar is removed and our access revoked (as many as one run allows).
+        const budget = { left: BUDGET };
+        for (const m of Object.values(cls.members || {})) { if (budget.left < 3) break; await farewell(env, m, budget); }
         await env.CLASSES.delete(classKey(id));
         return json({ ok: true, id, deleted: true });
       }

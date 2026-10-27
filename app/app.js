@@ -420,10 +420,11 @@ function renderJoin() {
   if (!can) return;
   els.joinBtn.href = `${feedBase()}/oauth/start?class=${cls}&back=app`;
   const j = state.joined;
-  els.joinNote.textContent = j == null ? 'One tap now; nothing to tap per notice. Reminders come from Google Calendar itself.'
+  els.joinNote.textContent = j == null ? 'One tap now; nothing to tap per notice. On Google\'s screen, tick the calendar box (it starts unticked).'
+    : j === 'noscope' ? 'Almost: on Google\'s screen tick the box "Make secondary Google calendars…", then Continue. Without it nothing can be added.'
     : j === 'no' ? 'Google sign-in was cancelled or failed. Try again.' : j === 'norefresh' ? 'Google did not give long-term access. Remove Notice Decoder at myaccount.google.com/permissions, then join again.'
-      : j === 'full' ? 'This class is full.' : `Joined as ${j}. Every notice now lands in your Google Calendar (the "Notice Decoder" calendar; tick it once in the app if it is hidden).`;
-  if (j && !['no', 'norefresh', 'full'].includes(j)) els.joinBtn.textContent = 'Joined with Google';
+      : j === 'full' ? 'This class is full.' : `Joined as ${j}. Every notice now lands in your Google Calendar, in the calendar "${state.shared?.className || "Class"} · Notice Decoder" (tick it once in the app if it is hidden).`;
+  if (j && !['no', 'noscope', 'norefresh', 'full'].includes(j)) els.joinBtn.textContent = 'Joined with Google';
 }
 
 function renderPush() {

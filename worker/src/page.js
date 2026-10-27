@@ -22,22 +22,24 @@ function eventRow(e) {
 }
 
 // The one-tap box: Join with Google (the server writes every notice into the student's calendar from then on).
-function joinBox({ google, me, joined, written, origin, id, upcoming }) {
+function joinBox({ google, me, joined, written, origin, id, upcoming, clsName }) {
   if (!google) return '';
   const start = `${origin}/oauth/start?class=${id}`;
   if (me && !me.revoked) {
     return `<section class="card join" aria-label="Joined"><h2>✅ Joined${me.email ? ` as ${esc(me.email)}` : ''}</h2>
 <p class="big">Every notice this class publishes goes into <b>your Google Calendar</b> by itself, with reminders. Nothing more to do.${joined && written ? ` <span class="ok">${esc(written)} event${written === '1' ? '' : 's'} written just now.</span>` : ''}</p>
-<p><small>Look for the calendar named <b>Notice Decoder</b> in the Google Calendar app (☰ menu). If it is not ticked, tick it once.</small></p>
+<p><small>In the Google Calendar app it is the calendar <b>${esc(String(clsName || "Class").slice(0, 60))} · Notice Decoder</b> (☰ menu). If it is not ticked, tick it once. Leaving removes that calendar.</small></p>
 <form method="post" action="${origin}/api/class/${id}/leave" onsubmit="return confirm('Leave? New notices will stop going to your calendar.')"><button class="btn" type="submit">Leave this class</button></form></section>`;
   }
   const note = joined === 'no' ? '<p class="warn">Google sign-in was cancelled or failed. Try again.</p>'
+    : joined === 'noscope' ? '<p class="warn">Almost: on Google\'s screen, tick the box <b>“Make secondary Google calendars…”</b>, then Continue. Without it we cannot add anything to your calendar.</p>'
     : joined === 'norefresh' ? '<p class="warn">Google did not give long-term access. Remove Notice Decoder at myaccount.google.com/permissions, then join again.</p>'
       : joined === 'full' ? '<p class="warn">This class is full.</p>' : me?.revoked ? '<p class="warn">Your Google access was removed. Join again to continue.</p>' : '';
   return `<section class="card join" aria-label="Join"><h2>One tap, then never again</h2>
 <p class="big">Join with Google once. From then on every notice the class representative publishes lands in <b>your Google Calendar</b> on its own, with a reminder before each event. ${upcoming ? `${upcoming} upcoming event${upcoming === 1 ? '' : 's'} go in right away.` : ''}</p>
 ${note}<div class="btns"><a class="btn p" href="${esc(start)}">Join with Google</a></div>
-<p><small>Only a calendar named "Notice Decoder" that we create is touched; we cannot see your other events.</small></p></section>`;
+<p><small>On Google's screen, <b>tick the calendar box</b> before Continue (Google leaves it unticked).</small></p>
+<p><small>We add one calendar for this class and touch nothing else: we cannot see your other events.</small></p></section>`;
 }
 
 export function subscribePage({ cls, id, origin, appUrl, today, clashes, changes, google = false, me = null, joined = null, written = null }) {
@@ -59,7 +61,7 @@ export function subscribePage({ cls, id, origin, appUrl, today, clashes, changes
     + (c.kind === 'moved' && c.from ? `${esc(prettyDate(c.from.date))}${c.from.start ? ` ${esc(fmt12(c.from.start))}` : ''} → <b>${esc(prettyDate(c.date))}${c.start ? ` ${esc(fmt12(c.start))}` : ''}</b>` : `${esc(prettyDate(c.date))}${c.start ? ` ${esc(fmt12(c.start))}` : ''}`)
     + ` <time data-at="${esc(c.at)}"></time></li>`;
   const desc = `${upcoming.length} upcoming event${upcoming.length === 1 ? '' : 's'}. Subscribe once; it updates by itself when a notice changes.`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%93%85%3C/text%3E%3C/svg%3E">
 <title>${esc(cls.name)} · class calendar</title>
 <meta name="robots" content="noindex"><meta name="description" content="${esc(desc)}">
 <meta property="og:title" content="${esc(cls.name)} · class calendar"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(page)}">
@@ -82,12 +84,12 @@ li.ev{display:grid;grid-template-columns:7.5em 1fr;gap:8px;padding:10px 0;border
 @media (max-width:420px){li.ev{grid-template-columns:1fr}}
 </style></head><body><main>
 <h1>${esc(cls.name)}</h1>
-<p class="sub">One calendar for the whole class. Subscribe once; when the class representative publishes a new or changed notice, your calendar updates by itself.</p>
+<p class="sub">${google ? 'One calendar for the whole class. Join once; when the class representative publishes a new or changed notice, it is in your Google Calendar within seconds.' : 'One calendar for the whole class. Subscribe once; when the class representative publishes a new or changed notice, your calendar updates by itself.'}</p>
 <section class="card" aria-label="Subscribe">
-${joinBox({ google, me, joined, written, origin, id, upcoming: upcoming.length })}
+${joinBox({ google, me, joined, written, origin, id, upcoming: upcoming.length, clsName: cls.name })}
 <div class="btns">${google ? '' : `<a class="btn p" href="${esc(googleSub)}">Add to Google Calendar</a>`}<a class="btn" href="${esc(webcal)}">Apple / Outlook${google ? ' (subscribe)' : ''}</a>${app ? `<a class="btn" href="${esc(app)}">Open in Notice Decoder</a>` : ''}<button class="btn" type="button" id="qr-btn" hidden>Show QR code</button></div>
 <div id="qr" aria-label="QR code of this page"></div>
-<p><small>Google refreshes subscribed calendars every 12 to 24 hours; Apple and Outlook about every hour; the Notice Decoder app shows changes at once. Feed: <code>${esc(feed)}</code></small></p>
+<p><small>${google ? 'iPhone or Outlook: subscribe instead (refreshes about every hour). ' : 'Google refreshes subscribed calendars every 12 to 24 hours; Apple and Outlook about every hour; the Notice Decoder app shows changes at once. '}Feed: <code>${esc(feed)}</code></small></p>
 </section>
 ${clashes.length ? `<section class="card clash" aria-label="Clashes"><h2>⚠️ ${clashes.length} clash${clashes.length === 1 ? '' : 'es'} coming up</h2><ul>${clashes.slice(0, 8).map((c) => `<li><b>${esc(prettyDate(c.date))}</b>: ${esc(c.a)} × ${esc(c.b)}. ${esc(String(c.msg).replace(/^Clash\.\s*/, ''))}</li>`).join('')}</ul></section>` : ''}
 ${recent.length ? `<section class="card" aria-label="Recent changes"><h2>What changed</h2><ul>${recent.map(changeLine).join('')}</ul></section>` : ''}
