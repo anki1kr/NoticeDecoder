@@ -66,6 +66,16 @@
   lives only in the representative's browser; the server keeps a one-way hash of it. Anyone with the class link can see
   the class calendar, so do not publish anything private.</p>
 
+  <h2>Join with Google (optional)</h2>
+  <p>If you press <b>Join with Google</b> on a class, Google asks you once to let Notice Decoder <b>create a calendar
+  called "Notice Decoder" and manage events in it</b> (the <code>calendar.app.created</code> permission) and to see your
+  email address. Our class server then keeps a long-term token for that permission, encrypted, next to the class, and uses
+  it only to write, update or cancel the class's events in that calendar whenever the class representative publishes.
+  It cannot see your other calendars or events. <b>Leave this class</b> on the class page deletes the token and asks
+  Google to revoke it; you can also remove the app at
+  <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, after which the server stops
+  trying. Your email is shown only to you on the class page; the class representative sees only how many people joined.</p>
+
   <h2>Notifications (optional)</h2>
   <p>If you press <b>Notify me for this class</b>, your browser gives our class server a push address for this phone
   (a long random URL run by your browser maker: Google for Chrome, Mozilla for Firefox). We keep only that address next

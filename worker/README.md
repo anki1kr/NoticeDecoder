@@ -55,6 +55,20 @@ date within 60 days, or an event the notice itself says was postponed (`moved: t
 UIDs, times and reminders come from `app/engine/ics.js::calendarEntries`, the same code the .ics download and the
 Google writer use, so every path agrees. A stored event keeps its UID forever (edits, moves, renames).
 
+## Join with Google (server-side calendar writes)
+
+`GET /oauth/start?class=:id[&back=app]` -> Google consent (offline access, `calendar.app.created openid email`, the class
+id in an HMAC-signed `state`); `GET /oauth/callback` (routed to the class's Durable Object by `state`) exchanges the
+code with `GOOGLE_CLIENT_SECRET`, seals the refresh token with `TOKEN_KEY` (AES-GCM), stores the member (`members[sub]
+= {email, refresh, calendarId, map{uid: googleEventId}, synced}`), writes every current event at once, sets a
+`nd_member_<id>` cookie and redirects back (`?joined=<email>&written=n`). After every change `queueAll` lists the
+members and the alarm `drainQueue`s 8 per run, writing only events published since `member.synced` (PATCH by remembered
+id, else `events/import`; cancelled -> `status: cancelled`). `POST /api/class/:id/leave` (cookie) removes the member
+and revokes the token. A refresh that fails with `invalid_grant` marks the member `revoked` (the page says "join
+again"). Setup: the OAuth client needs `<worker origin>/oauth/callback` as a redirect URI; secrets
+`GOOGLE_CLIENT_SECRET` and `TOKEN_KEY` (`node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64url'))" | npx wrangler secret put TOKEN_KEY`).
+Google shows the new calendar hidden by default on phones; the server marks it `selected` and the page says to tick it if not.
+
 ## Notifications (Web Push)
 
 `POST /api/class/:id/push {subscription}` stores this phone's push endpoint on the class (no class key: students do it);
